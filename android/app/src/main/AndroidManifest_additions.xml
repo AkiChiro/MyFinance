@@ -1,0 +1,35 @@
+<!--
+  Merge these additions into android/app/src/main/AndroidManifest.xml
+  after running `make init`.
+
+  1. Inside <manifest>: add the RECEIVE_BOOT_COMPLETED permission so the
+     notification reappears after reboot (optional but recommended).
+
+  2. Inside <application>: add the widget provider receiver and the
+     notification permission for Android 13+.
+-->
+
+<!-- Permission additions (inside <manifest>) -->
+<!-- <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" /> -->
+<!-- <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> -->
+
+<!-- Application additions (inside <application>) -->
+<!--
+<receiver
+    android:name=".WidgetProvider"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+    </intent-filter>
+    <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/myfinance_widget_info" />
+</receiver>
+-->
+
+<!--
+  The full, ready-to-paste AndroidManifest.xml is in
+  android_overlay/AndroidManifest_full_example.xml (for reference).
+  The Makefile's `make init` step will copy android_overlay/ files
+  into android/ automatically after `flutter create` runs.
+-->

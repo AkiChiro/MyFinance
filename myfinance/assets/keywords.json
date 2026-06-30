@@ -1,0 +1,30 @@
+[
+  { "keyword": "đồ ăn",    "category": "food",         "weight": 10 },
+  { "keyword": "ăn",       "category": "food",         "weight": 6  },
+  { "keyword": "trà sữa",  "category": "food",         "weight": 6  },
+  { "keyword": "cà phê",   "category": "food",         "weight": 6  },
+  { "keyword": "cơm",      "category": "food",         "weight": 6  },
+
+  { "keyword": "điện",     "category": "necessities",  "weight": 10 },
+  { "keyword": "nước",     "category": "necessities",  "weight": 10 },
+  { "keyword": "internet", "category": "necessities",  "weight": 10 },
+  { "keyword": "xăng",     "category": "necessities",  "weight": 9  },
+  { "keyword": "grab",     "category": "necessities",  "weight": 7  },
+  { "keyword": "xe",       "category": "necessities",  "weight": 7  },
+  { "keyword": "vé",       "category": "necessities",  "weight": 7  },
+  { "keyword": "học phí",  "category": "necessities",  "weight": 8  },
+  { "keyword": "school",   "category": "necessities",  "weight": 8  },
+
+  { "keyword": "bàn phím", "category": "hobbies",      "weight": 9  },
+  { "keyword": "keycap",   "category": "hobbies",      "weight": 9  },
+  { "keyword": "switch",   "category": "hobbies",      "weight": 9  },
+  { "keyword": "tai nghe", "category": "hobbies",      "weight": 9  },
+  { "keyword": "chuột",    "category": "hobbies",      "weight": 9  },
+  { "keyword": "mouse",    "category": "hobbies",      "weight": 9  },
+
+  { "keyword": "bố mẹ",    "category": "provided",     "weight": 10 },
+  { "keyword": "ba mẹ",    "category": "provided",     "weight": 10 },
+
+  { "keyword": "lương",    "category": "self_earned",  "weight": 10 },
+  { "keyword": "freelance","category": "self_earned",  "weight": 10 }
+]

@@ -1,0 +1,23 @@
+import 'package:intl/intl.dart';
+
+final _vnd = NumberFormat.decimalPattern('vi');
+final _date = DateFormat('dd/MM/yyyy HH:mm');
+final _dateShort = DateFormat('dd/MM/yyyy');
+final _month = DateFormat('MM/yyyy');
+
+String formatVnd(int amount) => '${_vnd.format(amount)} ₫';
+
+/// Signed amount for transaction lists, e.g. "-50.000 ₫" / "+1.200.000 ₫".
+String formatSigned(int amount, {required bool negative}) =>
+    '${negative ? '-' : '+'}${formatVnd(amount.abs())}';
+
+String formatDateTime(DateTime t) => _date.format(t);
+String formatDate(DateTime t) => _dateShort.format(t);
+String formatMonth(DateTime t) => _month.format(t);
+
+/// Parse a user-typed amount, ignoring any grouping characters they add.
+int parseAmount(String raw) {
+  final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digits.isEmpty) return 0;
+  return int.tryParse(digits) ?? 0;
+}
