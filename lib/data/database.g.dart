@@ -336,6 +336,28 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("imported" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _starredMeta =
+      const VerificationMeta('starred');
+  @override
+  late final GeneratedColumn<bool> starred = GeneratedColumn<bool>(
+      'starred', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("starred" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _walletFromNameMeta =
+      const VerificationMeta('walletFromName');
+  @override
+  late final GeneratedColumn<String> walletFromName = GeneratedColumn<String>(
+      'wallet_from_name', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _walletToNameMeta =
+      const VerificationMeta('walletToName');
+  @override
+  late final GeneratedColumn<String> walletToName = GeneratedColumn<String>(
+      'wallet_to_name', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -347,7 +369,10 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
         category,
         timestamp,
         createdAt,
-        imported
+        imported,
+        starred,
+        walletFromName,
+        walletToName
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -414,6 +439,22 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
       context.handle(_importedMeta,
           imported.isAcceptableOrUnknown(data['imported']!, _importedMeta));
     }
+    if (data.containsKey('starred')) {
+      context.handle(_starredMeta,
+          starred.isAcceptableOrUnknown(data['starred']!, _starredMeta));
+    }
+    if (data.containsKey('wallet_from_name')) {
+      context.handle(
+          _walletFromNameMeta,
+          walletFromName.isAcceptableOrUnknown(
+              data['wallet_from_name']!, _walletFromNameMeta));
+    }
+    if (data.containsKey('wallet_to_name')) {
+      context.handle(
+          _walletToNameMeta,
+          walletToName.isAcceptableOrUnknown(
+              data['wallet_to_name']!, _walletToNameMeta));
+    }
     return context;
   }
 
@@ -443,6 +484,12 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
       imported: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}imported'])!,
+      starred: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}starred'])!,
+      walletFromName: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}wallet_from_name']),
+      walletToName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}wallet_to_name']),
     );
   }
 
@@ -463,6 +510,13 @@ class Txn extends DataClass implements Insertable<Txn> {
   final DateTime timestamp;
   final DateTime createdAt;
   final bool imported;
+  final bool starred;
+
+  /// Snapshot of the source wallet name at CSV-import time (for merged rows).
+  final String? walletFromName;
+
+  /// Snapshot of the destination wallet name at CSV-import time.
+  final String? walletToName;
   const Txn(
       {required this.id,
       required this.type,
@@ -473,7 +527,10 @@ class Txn extends DataClass implements Insertable<Txn> {
       this.category,
       required this.timestamp,
       required this.createdAt,
-      required this.imported});
+      required this.imported,
+      required this.starred,
+      this.walletFromName,
+      this.walletToName});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -493,6 +550,13 @@ class Txn extends DataClass implements Insertable<Txn> {
     map['timestamp'] = Variable<DateTime>(timestamp);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['imported'] = Variable<bool>(imported);
+    map['starred'] = Variable<bool>(starred);
+    if (!nullToAbsent || walletFromName != null) {
+      map['wallet_from_name'] = Variable<String>(walletFromName);
+    }
+    if (!nullToAbsent || walletToName != null) {
+      map['wallet_to_name'] = Variable<String>(walletToName);
+    }
     return map;
   }
 
@@ -514,6 +578,13 @@ class Txn extends DataClass implements Insertable<Txn> {
       timestamp: Value(timestamp),
       createdAt: Value(createdAt),
       imported: Value(imported),
+      starred: Value(starred),
+      walletFromName: walletFromName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(walletFromName),
+      walletToName: walletToName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(walletToName),
     );
   }
 
@@ -531,6 +602,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       timestamp: serializer.fromJson<DateTime>(json['timestamp']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       imported: serializer.fromJson<bool>(json['imported']),
+      starred: serializer.fromJson<bool>(json['starred']),
+      walletFromName: serializer.fromJson<String?>(json['walletFromName']),
+      walletToName: serializer.fromJson<String?>(json['walletToName']),
     );
   }
   @override
@@ -547,6 +621,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       'timestamp': serializer.toJson<DateTime>(timestamp),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'imported': serializer.toJson<bool>(imported),
+      'starred': serializer.toJson<bool>(starred),
+      'walletFromName': serializer.toJson<String?>(walletFromName),
+      'walletToName': serializer.toJson<String?>(walletToName),
     };
   }
 
@@ -560,7 +637,10 @@ class Txn extends DataClass implements Insertable<Txn> {
           Value<String?> category = const Value.absent(),
           DateTime? timestamp,
           DateTime? createdAt,
-          bool? imported}) =>
+          bool? imported,
+          bool? starred,
+          Value<String?> walletFromName = const Value.absent(),
+          Value<String?> walletToName = const Value.absent()}) =>
       Txn(
         id: id ?? this.id,
         type: type ?? this.type,
@@ -572,6 +652,11 @@ class Txn extends DataClass implements Insertable<Txn> {
         timestamp: timestamp ?? this.timestamp,
         createdAt: createdAt ?? this.createdAt,
         imported: imported ?? this.imported,
+        starred: starred ?? this.starred,
+        walletFromName:
+            walletFromName.present ? walletFromName.value : this.walletFromName,
+        walletToName:
+            walletToName.present ? walletToName.value : this.walletToName,
       );
   Txn copyWithCompanion(TxnsCompanion data) {
     return Txn(
@@ -587,6 +672,13 @@ class Txn extends DataClass implements Insertable<Txn> {
       timestamp: data.timestamp.present ? data.timestamp.value : this.timestamp,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       imported: data.imported.present ? data.imported.value : this.imported,
+      starred: data.starred.present ? data.starred.value : this.starred,
+      walletFromName: data.walletFromName.present
+          ? data.walletFromName.value
+          : this.walletFromName,
+      walletToName: data.walletToName.present
+          ? data.walletToName.value
+          : this.walletToName,
     );
   }
 
@@ -602,14 +694,29 @@ class Txn extends DataClass implements Insertable<Txn> {
           ..write('category: $category, ')
           ..write('timestamp: $timestamp, ')
           ..write('createdAt: $createdAt, ')
-          ..write('imported: $imported')
+          ..write('imported: $imported, ')
+          ..write('starred: $starred, ')
+          ..write('walletFromName: $walletFromName, ')
+          ..write('walletToName: $walletToName')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, type, amount, description, walletId,
-      walletToId, category, timestamp, createdAt, imported);
+  int get hashCode => Object.hash(
+      id,
+      type,
+      amount,
+      description,
+      walletId,
+      walletToId,
+      category,
+      timestamp,
+      createdAt,
+      imported,
+      starred,
+      walletFromName,
+      walletToName);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -623,7 +730,10 @@ class Txn extends DataClass implements Insertable<Txn> {
           other.category == this.category &&
           other.timestamp == this.timestamp &&
           other.createdAt == this.createdAt &&
-          other.imported == this.imported);
+          other.imported == this.imported &&
+          other.starred == this.starred &&
+          other.walletFromName == this.walletFromName &&
+          other.walletToName == this.walletToName);
 }
 
 class TxnsCompanion extends UpdateCompanion<Txn> {
@@ -637,6 +747,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
   final Value<DateTime> timestamp;
   final Value<DateTime> createdAt;
   final Value<bool> imported;
+  final Value<bool> starred;
+  final Value<String?> walletFromName;
+  final Value<String?> walletToName;
   final Value<int> rowid;
   const TxnsCompanion({
     this.id = const Value.absent(),
@@ -649,6 +762,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     this.timestamp = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.imported = const Value.absent(),
+    this.starred = const Value.absent(),
+    this.walletFromName = const Value.absent(),
+    this.walletToName = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TxnsCompanion.insert({
@@ -662,6 +778,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     required DateTime timestamp,
     required DateTime createdAt,
     this.imported = const Value.absent(),
+    this.starred = const Value.absent(),
+    this.walletFromName = const Value.absent(),
+    this.walletToName = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         type = Value(type),
@@ -680,6 +799,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     Expression<DateTime>? timestamp,
     Expression<DateTime>? createdAt,
     Expression<bool>? imported,
+    Expression<bool>? starred,
+    Expression<String>? walletFromName,
+    Expression<String>? walletToName,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -693,6 +815,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       if (timestamp != null) 'timestamp': timestamp,
       if (createdAt != null) 'created_at': createdAt,
       if (imported != null) 'imported': imported,
+      if (starred != null) 'starred': starred,
+      if (walletFromName != null) 'wallet_from_name': walletFromName,
+      if (walletToName != null) 'wallet_to_name': walletToName,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -708,6 +833,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       Value<DateTime>? timestamp,
       Value<DateTime>? createdAt,
       Value<bool>? imported,
+      Value<bool>? starred,
+      Value<String?>? walletFromName,
+      Value<String?>? walletToName,
       Value<int>? rowid}) {
     return TxnsCompanion(
       id: id ?? this.id,
@@ -720,6 +848,9 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       timestamp: timestamp ?? this.timestamp,
       createdAt: createdAt ?? this.createdAt,
       imported: imported ?? this.imported,
+      starred: starred ?? this.starred,
+      walletFromName: walletFromName ?? this.walletFromName,
+      walletToName: walletToName ?? this.walletToName,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -757,6 +888,15 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     if (imported.present) {
       map['imported'] = Variable<bool>(imported.value);
     }
+    if (starred.present) {
+      map['starred'] = Variable<bool>(starred.value);
+    }
+    if (walletFromName.present) {
+      map['wallet_from_name'] = Variable<String>(walletFromName.value);
+    }
+    if (walletToName.present) {
+      map['wallet_to_name'] = Variable<String>(walletToName.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -776,6 +916,391 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
           ..write('timestamp: $timestamp, ')
           ..write('createdAt: $createdAt, ')
           ..write('imported: $imported, ')
+          ..write('starred: $starred, ')
+          ..write('walletFromName: $walletFromName, ')
+          ..write('walletToName: $walletToName, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $AppCategoriesTable extends AppCategories
+    with TableInfo<$AppCategoriesTable, AppCategory> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AppCategoriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _labelMeta = const VerificationMeta('label');
+  @override
+  late final GeneratedColumn<String> label = GeneratedColumn<String>(
+      'label', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+      'kind', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _thresholdMeta =
+      const VerificationMeta('threshold');
+  @override
+  late final GeneratedColumn<int> threshold = GeneratedColumn<int>(
+      'threshold', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _isDefaultMeta =
+      const VerificationMeta('isDefault');
+  @override
+  late final GeneratedColumn<bool> isDefault = GeneratedColumn<bool>(
+      'is_default', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_default" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _archivedMeta =
+      const VerificationMeta('archived');
+  @override
+  late final GeneratedColumn<bool> archived = GeneratedColumn<bool>(
+      'archived', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("archived" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _sortOrderMeta =
+      const VerificationMeta('sortOrder');
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+      'sort_order', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, label, kind, threshold, isDefault, archived, sortOrder];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'app_categories';
+  @override
+  VerificationContext validateIntegrity(Insertable<AppCategory> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('label')) {
+      context.handle(
+          _labelMeta, label.isAcceptableOrUnknown(data['label']!, _labelMeta));
+    } else if (isInserting) {
+      context.missing(_labelMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+          _kindMeta, kind.isAcceptableOrUnknown(data['kind']!, _kindMeta));
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('threshold')) {
+      context.handle(_thresholdMeta,
+          threshold.isAcceptableOrUnknown(data['threshold']!, _thresholdMeta));
+    }
+    if (data.containsKey('is_default')) {
+      context.handle(_isDefaultMeta,
+          isDefault.isAcceptableOrUnknown(data['is_default']!, _isDefaultMeta));
+    }
+    if (data.containsKey('archived')) {
+      context.handle(_archivedMeta,
+          archived.isAcceptableOrUnknown(data['archived']!, _archivedMeta));
+    }
+    if (data.containsKey('sort_order')) {
+      context.handle(_sortOrderMeta,
+          sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AppCategory map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AppCategory(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      label: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}label'])!,
+      kind: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}kind'])!,
+      threshold: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}threshold'])!,
+      isDefault: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_default'])!,
+      archived: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}archived'])!,
+      sortOrder: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
+    );
+  }
+
+  @override
+  $AppCategoriesTable createAlias(String alias) {
+    return $AppCategoriesTable(attachedDatabase, alias);
+  }
+}
+
+class AppCategory extends DataClass implements Insertable<AppCategory> {
+  final String id;
+  final String label;
+  final String kind;
+  final int threshold;
+  final bool isDefault;
+  final bool archived;
+  final int sortOrder;
+  const AppCategory(
+      {required this.id,
+      required this.label,
+      required this.kind,
+      required this.threshold,
+      required this.isDefault,
+      required this.archived,
+      required this.sortOrder});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['label'] = Variable<String>(label);
+    map['kind'] = Variable<String>(kind);
+    map['threshold'] = Variable<int>(threshold);
+    map['is_default'] = Variable<bool>(isDefault);
+    map['archived'] = Variable<bool>(archived);
+    map['sort_order'] = Variable<int>(sortOrder);
+    return map;
+  }
+
+  AppCategoriesCompanion toCompanion(bool nullToAbsent) {
+    return AppCategoriesCompanion(
+      id: Value(id),
+      label: Value(label),
+      kind: Value(kind),
+      threshold: Value(threshold),
+      isDefault: Value(isDefault),
+      archived: Value(archived),
+      sortOrder: Value(sortOrder),
+    );
+  }
+
+  factory AppCategory.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AppCategory(
+      id: serializer.fromJson<String>(json['id']),
+      label: serializer.fromJson<String>(json['label']),
+      kind: serializer.fromJson<String>(json['kind']),
+      threshold: serializer.fromJson<int>(json['threshold']),
+      isDefault: serializer.fromJson<bool>(json['isDefault']),
+      archived: serializer.fromJson<bool>(json['archived']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'label': serializer.toJson<String>(label),
+      'kind': serializer.toJson<String>(kind),
+      'threshold': serializer.toJson<int>(threshold),
+      'isDefault': serializer.toJson<bool>(isDefault),
+      'archived': serializer.toJson<bool>(archived),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+    };
+  }
+
+  AppCategory copyWith(
+          {String? id,
+          String? label,
+          String? kind,
+          int? threshold,
+          bool? isDefault,
+          bool? archived,
+          int? sortOrder}) =>
+      AppCategory(
+        id: id ?? this.id,
+        label: label ?? this.label,
+        kind: kind ?? this.kind,
+        threshold: threshold ?? this.threshold,
+        isDefault: isDefault ?? this.isDefault,
+        archived: archived ?? this.archived,
+        sortOrder: sortOrder ?? this.sortOrder,
+      );
+  AppCategory copyWithCompanion(AppCategoriesCompanion data) {
+    return AppCategory(
+      id: data.id.present ? data.id.value : this.id,
+      label: data.label.present ? data.label.value : this.label,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      threshold: data.threshold.present ? data.threshold.value : this.threshold,
+      isDefault: data.isDefault.present ? data.isDefault.value : this.isDefault,
+      archived: data.archived.present ? data.archived.value : this.archived,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AppCategory(')
+          ..write('id: $id, ')
+          ..write('label: $label, ')
+          ..write('kind: $kind, ')
+          ..write('threshold: $threshold, ')
+          ..write('isDefault: $isDefault, ')
+          ..write('archived: $archived, ')
+          ..write('sortOrder: $sortOrder')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, label, kind, threshold, isDefault, archived, sortOrder);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AppCategory &&
+          other.id == this.id &&
+          other.label == this.label &&
+          other.kind == this.kind &&
+          other.threshold == this.threshold &&
+          other.isDefault == this.isDefault &&
+          other.archived == this.archived &&
+          other.sortOrder == this.sortOrder);
+}
+
+class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
+  final Value<String> id;
+  final Value<String> label;
+  final Value<String> kind;
+  final Value<int> threshold;
+  final Value<bool> isDefault;
+  final Value<bool> archived;
+  final Value<int> sortOrder;
+  final Value<int> rowid;
+  const AppCategoriesCompanion({
+    this.id = const Value.absent(),
+    this.label = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.threshold = const Value.absent(),
+    this.isDefault = const Value.absent(),
+    this.archived = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AppCategoriesCompanion.insert({
+    required String id,
+    required String label,
+    required String kind,
+    this.threshold = const Value.absent(),
+    this.isDefault = const Value.absent(),
+    this.archived = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        label = Value(label),
+        kind = Value(kind);
+  static Insertable<AppCategory> custom({
+    Expression<String>? id,
+    Expression<String>? label,
+    Expression<String>? kind,
+    Expression<int>? threshold,
+    Expression<bool>? isDefault,
+    Expression<bool>? archived,
+    Expression<int>? sortOrder,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (label != null) 'label': label,
+      if (kind != null) 'kind': kind,
+      if (threshold != null) 'threshold': threshold,
+      if (isDefault != null) 'is_default': isDefault,
+      if (archived != null) 'archived': archived,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AppCategoriesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? label,
+      Value<String>? kind,
+      Value<int>? threshold,
+      Value<bool>? isDefault,
+      Value<bool>? archived,
+      Value<int>? sortOrder,
+      Value<int>? rowid}) {
+    return AppCategoriesCompanion(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      kind: kind ?? this.kind,
+      threshold: threshold ?? this.threshold,
+      isDefault: isDefault ?? this.isDefault,
+      archived: archived ?? this.archived,
+      sortOrder: sortOrder ?? this.sortOrder,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (label.present) {
+      map['label'] = Variable<String>(label.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (threshold.present) {
+      map['threshold'] = Variable<int>(threshold.value);
+    }
+    if (isDefault.present) {
+      map['is_default'] = Variable<bool>(isDefault.value);
+    }
+    if (archived.present) {
+      map['archived'] = Variable<bool>(archived.value);
+    }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AppCategoriesCompanion(')
+          ..write('id: $id, ')
+          ..write('label: $label, ')
+          ..write('kind: $kind, ')
+          ..write('threshold: $threshold, ')
+          ..write('isDefault: $isDefault, ')
+          ..write('archived: $archived, ')
+          ..write('sortOrder: $sortOrder, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -787,11 +1312,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $WalletsTable wallets = $WalletsTable(this);
   late final $TxnsTable txns = $TxnsTable(this);
+  late final $AppCategoriesTable appCategories = $AppCategoriesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [wallets, txns];
+  List<DatabaseSchemaEntity> get allSchemaEntities =>
+      [wallets, txns, appCategories];
 }
 
 typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
@@ -957,6 +1484,9 @@ typedef $$TxnsTableCreateCompanionBuilder = TxnsCompanion Function({
   required DateTime timestamp,
   required DateTime createdAt,
   Value<bool> imported,
+  Value<bool> starred,
+  Value<String?> walletFromName,
+  Value<String?> walletToName,
   Value<int> rowid,
 });
 typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
@@ -970,6 +1500,9 @@ typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
   Value<DateTime> timestamp,
   Value<DateTime> createdAt,
   Value<bool> imported,
+  Value<bool> starred,
+  Value<String?> walletFromName,
+  Value<String?> walletToName,
   Value<int> rowid,
 });
 
@@ -1010,6 +1543,16 @@ class $$TxnsTableFilterComposer extends Composer<_$AppDatabase, $TxnsTable> {
 
   ColumnFilters<bool> get imported => $composableBuilder(
       column: $table.imported, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get starred => $composableBuilder(
+      column: $table.starred, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get walletFromName => $composableBuilder(
+      column: $table.walletFromName,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get walletToName => $composableBuilder(
+      column: $table.walletToName, builder: (column) => ColumnFilters(column));
 }
 
 class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
@@ -1049,6 +1592,17 @@ class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
 
   ColumnOrderings<bool> get imported => $composableBuilder(
       column: $table.imported, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get starred => $composableBuilder(
+      column: $table.starred, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get walletFromName => $composableBuilder(
+      column: $table.walletFromName,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get walletToName => $composableBuilder(
+      column: $table.walletToName,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$TxnsTableAnnotationComposer
@@ -1089,6 +1643,15 @@ class $$TxnsTableAnnotationComposer
 
   GeneratedColumn<bool> get imported =>
       $composableBuilder(column: $table.imported, builder: (column) => column);
+
+  GeneratedColumn<bool> get starred =>
+      $composableBuilder(column: $table.starred, builder: (column) => column);
+
+  GeneratedColumn<String> get walletFromName => $composableBuilder(
+      column: $table.walletFromName, builder: (column) => column);
+
+  GeneratedColumn<String> get walletToName => $composableBuilder(
+      column: $table.walletToName, builder: (column) => column);
 }
 
 class $$TxnsTableTableManager extends RootTableManager<
@@ -1124,6 +1687,9 @@ class $$TxnsTableTableManager extends RootTableManager<
             Value<DateTime> timestamp = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<bool> imported = const Value.absent(),
+            Value<bool> starred = const Value.absent(),
+            Value<String?> walletFromName = const Value.absent(),
+            Value<String?> walletToName = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion(
@@ -1137,6 +1703,9 @@ class $$TxnsTableTableManager extends RootTableManager<
             timestamp: timestamp,
             createdAt: createdAt,
             imported: imported,
+            starred: starred,
+            walletFromName: walletFromName,
+            walletToName: walletToName,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1150,6 +1719,9 @@ class $$TxnsTableTableManager extends RootTableManager<
             required DateTime timestamp,
             required DateTime createdAt,
             Value<bool> imported = const Value.absent(),
+            Value<bool> starred = const Value.absent(),
+            Value<String?> walletFromName = const Value.absent(),
+            Value<String?> walletToName = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion.insert(
@@ -1163,6 +1735,9 @@ class $$TxnsTableTableManager extends RootTableManager<
             timestamp: timestamp,
             createdAt: createdAt,
             imported: imported,
+            starred: starred,
+            walletFromName: walletFromName,
+            walletToName: walletToName,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -1184,6 +1759,209 @@ typedef $$TxnsTableProcessedTableManager = ProcessedTableManager<
     (Txn, BaseReferences<_$AppDatabase, $TxnsTable, Txn>),
     Txn,
     PrefetchHooks Function()>;
+typedef $$AppCategoriesTableCreateCompanionBuilder = AppCategoriesCompanion
+    Function({
+  required String id,
+  required String label,
+  required String kind,
+  Value<int> threshold,
+  Value<bool> isDefault,
+  Value<bool> archived,
+  Value<int> sortOrder,
+  Value<int> rowid,
+});
+typedef $$AppCategoriesTableUpdateCompanionBuilder = AppCategoriesCompanion
+    Function({
+  Value<String> id,
+  Value<String> label,
+  Value<String> kind,
+  Value<int> threshold,
+  Value<bool> isDefault,
+  Value<bool> archived,
+  Value<int> sortOrder,
+  Value<int> rowid,
+});
+
+class $$AppCategoriesTableFilterComposer
+    extends Composer<_$AppDatabase, $AppCategoriesTable> {
+  $$AppCategoriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get label => $composableBuilder(
+      column: $table.label, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get threshold => $composableBuilder(
+      column: $table.threshold, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isDefault => $composableBuilder(
+      column: $table.isDefault, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get archived => $composableBuilder(
+      column: $table.archived, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+      column: $table.sortOrder, builder: (column) => ColumnFilters(column));
+}
+
+class $$AppCategoriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $AppCategoriesTable> {
+  $$AppCategoriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get label => $composableBuilder(
+      column: $table.label, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get threshold => $composableBuilder(
+      column: $table.threshold, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isDefault => $composableBuilder(
+      column: $table.isDefault, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get archived => $composableBuilder(
+      column: $table.archived, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+      column: $table.sortOrder, builder: (column) => ColumnOrderings(column));
+}
+
+class $$AppCategoriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AppCategoriesTable> {
+  $$AppCategoriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get label =>
+      $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get threshold =>
+      $composableBuilder(column: $table.threshold, builder: (column) => column);
+
+  GeneratedColumn<bool> get isDefault =>
+      $composableBuilder(column: $table.isDefault, builder: (column) => column);
+
+  GeneratedColumn<bool> get archived =>
+      $composableBuilder(column: $table.archived, builder: (column) => column);
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+}
+
+class $$AppCategoriesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $AppCategoriesTable,
+    AppCategory,
+    $$AppCategoriesTableFilterComposer,
+    $$AppCategoriesTableOrderingComposer,
+    $$AppCategoriesTableAnnotationComposer,
+    $$AppCategoriesTableCreateCompanionBuilder,
+    $$AppCategoriesTableUpdateCompanionBuilder,
+    (
+      AppCategory,
+      BaseReferences<_$AppDatabase, $AppCategoriesTable, AppCategory>
+    ),
+    AppCategory,
+    PrefetchHooks Function()> {
+  $$AppCategoriesTableTableManager(_$AppDatabase db, $AppCategoriesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AppCategoriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AppCategoriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AppCategoriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> label = const Value.absent(),
+            Value<String> kind = const Value.absent(),
+            Value<int> threshold = const Value.absent(),
+            Value<bool> isDefault = const Value.absent(),
+            Value<bool> archived = const Value.absent(),
+            Value<int> sortOrder = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              AppCategoriesCompanion(
+            id: id,
+            label: label,
+            kind: kind,
+            threshold: threshold,
+            isDefault: isDefault,
+            archived: archived,
+            sortOrder: sortOrder,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String label,
+            required String kind,
+            Value<int> threshold = const Value.absent(),
+            Value<bool> isDefault = const Value.absent(),
+            Value<bool> archived = const Value.absent(),
+            Value<int> sortOrder = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              AppCategoriesCompanion.insert(
+            id: id,
+            label: label,
+            kind: kind,
+            threshold: threshold,
+            isDefault: isDefault,
+            archived: archived,
+            sortOrder: sortOrder,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$AppCategoriesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $AppCategoriesTable,
+    AppCategory,
+    $$AppCategoriesTableFilterComposer,
+    $$AppCategoriesTableOrderingComposer,
+    $$AppCategoriesTableAnnotationComposer,
+    $$AppCategoriesTableCreateCompanionBuilder,
+    $$AppCategoriesTableUpdateCompanionBuilder,
+    (
+      AppCategory,
+      BaseReferences<_$AppDatabase, $AppCategoriesTable, AppCategory>
+    ),
+    AppCategory,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1191,4 +1969,6 @@ class $AppDatabaseManager {
   $$WalletsTableTableManager get wallets =>
       $$WalletsTableTableManager(_db, _db.wallets);
   $$TxnsTableTableManager get txns => $$TxnsTableTableManager(_db, _db.txns);
+  $$AppCategoriesTableTableManager get appCategories =>
+      $$AppCategoriesTableTableManager(_db, _db.appCategories);
 }
