@@ -19,8 +19,9 @@ class CsvService {
   CsvService(this.db);
   final AppDatabase db;
 
-  /// Writes two CSVs (transactions + wallets) to a temp dir and returns them
-  /// for the share sheet. Fully offline — sharing/saving is the user's choice.
+  /// Exports two CSVs (transactions + wallets) and returns them for the share
+  /// sheet. Now includes wallet_from_name and wallet_to_name snapshot columns
+  /// so that a restore can recover readable wallet names even if wallets change.
   Future<List<XFile>> export() async {
     final txList = await db.allTxns();
     final wList = await db.allWallets();
@@ -28,13 +29,19 @@ class CsvService {
     final txRows = <List<dynamic>>[
       [
         'id', 'type', 'amount', 'description',
-        'wallet_id', 'wallet_to_id', 'category', 'timestamp', 'imported'
+        'wallet_id', 'wallet_to_id',
+        'wallet_from_name', 'wallet_to_name',
+        'category', 'timestamp', 'imported', 'starred',
       ],
       for (final t in txList)
         [
           t.id, t.type, t.amount, t.description ?? '',
-          t.walletId, t.walletToId ?? '', t.category ?? '',
-          t.timestamp.toIso8601String(), t.imported ? 1 : 0,
+          t.walletId, t.walletToId ?? '',
+          t.walletFromName ?? '', t.walletToName ?? '',
+          t.category ?? '',
+          t.timestamp.toIso8601String(),
+          t.imported ? 1 : 0,
+          t.starred ? 1 : 0,
         ],
     ];
 
@@ -54,9 +61,9 @@ class CsvService {
     return [XFile(txFile.path), XFile(wFile.path)];
   }
 
-  /// Merge-by-id import of a transactions CSV. Rows whose id already exists are
-  /// skipped; new rows are inserted and flagged `imported` (archive-only:
-  /// excluded from balance and analytics).
+  /// Merge-by-id import of a transactions CSV. Rows whose id already exists
+  /// are skipped. New rows are flagged `imported` (archive-only: excluded from
+  /// balance and analytics). Reads wallet name snapshot columns when present.
   Future<ImportResult> importMerge(String path) async {
     final content = await File(path).readAsString();
     final rows = const CsvToListConverter().convert(content);
@@ -87,6 +94,8 @@ class CsvService {
       final desc = cell(r, 'description');
       final toId = cell(r, 'wallet_to_id');
       final cat = cell(r, 'category');
+      final fromName = cell(r, 'wallet_from_name');
+      final toName = cell(r, 'wallet_to_name');
 
       await db.into(db.txns).insert(TxnsCompanion.insert(
             id: id,
@@ -95,14 +104,95 @@ class CsvService {
             description: Value(desc.isEmpty ? null : desc),
             walletId: cell(r, 'wallet_id'),
             walletToId: Value(toId.isEmpty ? null : toId),
+            walletFromName: Value(fromName.isEmpty ? null : fromName),
+            walletToName: Value(toName.isEmpty ? null : toName),
             category: Value(cat.isEmpty ? null : cat),
             timestamp: ts,
             createdAt: now,
-            imported: const Value(true), // archive-only on this device
+            imported: const Value(true),
           ));
       existing.add(id);
       added++;
     }
     return ImportResult(added, skipped);
+  }
+
+  /// Full restore: delete all local data then insert wallets + transactions
+  /// from the given CSV paths. Transactions are NOT flagged as imported —
+  /// they restore full balance/analytics participation.
+  Future<ImportResult> importReplace(
+      String walletsPath, String txnsPath) async {
+    await db.delete(db.txns).go();
+    await db.delete(db.wallets).go();
+
+    // ── Wallets ──────────────────────────────────────────────────────────────
+    final wContent = await File(walletsPath).readAsString();
+    final wRows = const CsvToListConverter().convert(wContent);
+    if (wRows.length >= 2) {
+      final wHeader = wRows.first.map((e) => e.toString().trim()).toList();
+      final wIdx = {for (var i = 0; i < wHeader.length; i++) wHeader[i]: i};
+      String wcell(List<dynamic> r, String key) {
+        final i = wIdx[key];
+        if (i == null || i >= r.length) return '';
+        return r[i].toString().trim();
+      }
+
+      for (final r in wRows.skip(1)) {
+        final id = wcell(r, 'id');
+        if (id.isEmpty) continue;
+        await db.into(db.wallets).insertOnConflictUpdate(WalletsCompanion(
+          id: Value(id),
+          name: Value(wcell(r, 'name')),
+          initialBalance: Value(int.tryParse(wcell(r, 'initial_balance')) ?? 0),
+          type: Value(wcell(r, 'type')),
+        ));
+      }
+    }
+
+    // ── Transactions ─────────────────────────────────────────────────────────
+    final tContent = await File(txnsPath).readAsString();
+    final tRows = const CsvToListConverter().convert(tContent);
+    if (tRows.length < 2) return const ImportResult(0, 0);
+
+    final tHeader = tRows.first.map((e) => e.toString().trim()).toList();
+    final tIdx = {for (var i = 0; i < tHeader.length; i++) tHeader[i]: i};
+    String tcell(List<dynamic> r, String key) {
+      final i = tIdx[key];
+      if (i == null || i >= r.length) return '';
+      return r[i].toString().trim();
+    }
+
+    final now = DateTime.now();
+    var added = 0;
+    for (final r in tRows.skip(1)) {
+      final id = tcell(r, 'id');
+      if (id.isEmpty) continue;
+      final type = tcell(r, 'type');
+      final amount = int.tryParse(tcell(r, 'amount')) ?? 0;
+      final ts = DateTime.tryParse(tcell(r, 'timestamp')) ?? now;
+      final desc = tcell(r, 'description');
+      final toId = tcell(r, 'wallet_to_id');
+      final cat = tcell(r, 'category');
+      final fromName = tcell(r, 'wallet_from_name');
+      final toName = tcell(r, 'wallet_to_name');
+      final starred = tcell(r, 'starred') == '1';
+
+      await db.into(db.txns).insertOnConflictUpdate(TxnsCompanion.insert(
+            id: id,
+            type: type.isEmpty ? 'spending' : type,
+            amount: amount,
+            description: Value(desc.isEmpty ? null : desc),
+            walletId: tcell(r, 'wallet_id'),
+            walletToId: Value(toId.isEmpty ? null : toId),
+            walletFromName: Value(fromName.isEmpty ? null : fromName),
+            walletToName: Value(toName.isEmpty ? null : toName),
+            category: Value(cat.isEmpty ? null : cat),
+            starred: Value(starred),
+            timestamp: ts,
+            createdAt: now,
+          ));
+      added++;
+    }
+    return ImportResult(added, 0);
   }
 }

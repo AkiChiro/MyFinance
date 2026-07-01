@@ -21,14 +21,57 @@ class FinanceRepository {
   final AppDatabase db;
   final CsvService csv;
 
-  // ---------- streams ----------
+  // ── Streams ─────────────────────────────────────────────────────────────────
+
   Stream<List<Wallet>> watchWallets() => db.watchWallets();
   Stream<List<Txn>> watchTxns() => db.watchTxns();
   Future<List<Wallet>> allWallets() => db.allWallets();
 
-  // ---------- balance ----------
-  /// Pure balance computation over a given transaction list (UI-friendly).
-  /// Imported (archive-only) transactions never affect the balance.
+  // ── Categories ────────────────────────────────────────────────────────────────
+
+  Stream<List<AppCategory>> watchActiveCategories(String kind) =>
+      db.watchActiveCategories(kind);
+
+  Future<List<AppCategory>> activeCategories(String kind) =>
+      db.activeCategories(kind);
+
+  Future<Map<String, int>> categoryThresholds(String kind) =>
+      db.categoryThresholds(kind);
+
+  Future<void> addCategory({
+    required String label,
+    required String kind,
+    int threshold = 0,
+  }) async {
+    final existing = await db.activeCategories(kind);
+    await db.into(db.appCategories).insert(
+          AppCategoriesCompanion.insert(
+            id: _uuid.v4(),
+            label: label,
+            kind: kind,
+            threshold: Value(threshold),
+            sortOrder: Value(existing.length),
+          ),
+        );
+  }
+
+  Future<void> updateCategory(AppCategory cat) =>
+      db.update(db.appCategories).replace(cat);
+
+  Future<void> archiveCategory(String id) =>
+      (db.update(db.appCategories)..where((c) => c.id.equals(id)))
+          .write(const AppCategoriesCompanion(archived: Value(true)));
+
+  Future<void> unarchiveCategory(String id) =>
+      (db.update(db.appCategories)..where((c) => c.id.equals(id)))
+          .write(const AppCategoriesCompanion(archived: Value(false)));
+
+  Future<void> setCategoryThreshold(String id, int threshold) =>
+      (db.update(db.appCategories)..where((c) => c.id.equals(id)))
+          .write(AppCategoriesCompanion(threshold: Value(threshold)));
+
+  // ── Balance ─────────────────────────────────────────────────────────────────
+
   int balanceOf(Wallet w, List<Txn> txns) {
     var bal = w.initialBalance;
     for (final t in txns) {
@@ -65,7 +108,8 @@ class FinanceRepository {
     if (amount > available) throw const OverspendException();
   }
 
-  // ---------- wallets ----------
+  // ── Wallets ──────────────────────────────────────────────────────────────────
+
   Future<void> addWallet({
     required String name,
     required int initialBalance,
@@ -82,7 +126,8 @@ class FinanceRepository {
   Future<void> deleteWallet(String id) =>
       (db.delete(db.wallets)..where((w) => w.id.equals(id))).go();
 
-  // ---------- create transactions ----------
+  // ── Create transactions ──────────────────────────────────────────────────────
+
   Future<void> addSpending({
     required int amount,
     required String walletId,
@@ -143,9 +188,8 @@ class FinanceRepository {
         ));
   }
 
-  // ---------- edit / delete ----------
-  /// Replaces an existing transaction. Re-runs the overspend guard (excluding
-  /// the row being edited) for spending/transfer.
+  // ── Edit / delete ────────────────────────────────────────────────────────────
+
   Future<void> updateTxn(Txn t) async {
     if (t.type == TxTypes.spending || t.type == TxTypes.transfer) {
       await _assertSufficient(t.walletId, t.amount, excludeId: t.id);
@@ -156,9 +200,17 @@ class FinanceRepository {
   Future<void> deleteTxn(String id) =>
       (db.delete(db.txns)..where((t) => t.id.equals(id))).go();
 
-  // ---------- analytics ----------
+  // ── Starred (§5) ─────────────────────────────────────────────────────────────
 
-  /// Returns {category -> total VND} for non-imported [txType] txns in [month].
+  Future<void> setStarred(String id, {required bool starred}) =>
+      (db.update(db.txns)..where((t) => t.id.equals(id)))
+          .write(TxnsCompanion(starred: Value(starred)));
+
+  Future<void> toggleStar(Txn txn) =>
+      setStarred(txn.id, starred: !txn.starred);
+
+  // ── Analytics ────────────────────────────────────────────────────────────────
+
   Future<Map<String, int>> categoryTotals(String txType, DateTime month) async {
     final all = await db.nativeTxns();
     final result = <String, int>{};
@@ -188,4 +240,21 @@ class FinanceRepository {
     }
     return total;
   }
+}
+
+// ── Auto-star helper (§5) — pure function, no repository needed ───────────────
+
+/// Returns true if [t] should be auto-starred based on category thresholds.
+/// [thresholds] is a Map<categoryId, VND limit> from the Categories table.
+bool isAutoStarred(
+  Txn t,
+  Map<String, int> thresholds, {
+  required bool enabled,
+}) {
+  if (!enabled) return false;
+  if (t.type != TxTypes.spending || t.imported || t.walletToId != null) {
+    return false;
+  }
+  final limit = thresholds[t.category] ?? 0;
+  return limit > 0 && t.amount > limit;
 }

@@ -30,6 +30,12 @@ dependencies:
   # P2 — charts
   fl_chart: ^0.69.0
 
+  # Settings persistence
+  shared_preferences: ^2.3.0
+
+  # Runtime permission requests (POST_NOTIFICATIONS on Android 13+)
+  permission_handler: ^11.3.1
+
   # P3 — persistent notification + home-screen widget
   flutter_local_notifications: ^17.2.4
   home_widget: ^0.9.0

@@ -109,6 +109,14 @@ if "POST_NOTIFICATIONS" not in text:
     )
     print("[patch_android] AndroidManifest.xml: POST_NOTIFICATIONS added")
 
+if "RECEIVE_BOOT_COMPLETED" not in text:
+    text = text.replace(
+        "    <application",
+        '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application',
+        1,
+    )
+    print("[patch_android] AndroidManifest.xml: RECEIVE_BOOT_COMPLETED added")
+
 widget_receiver = """\
         <receiver
             android:name=".WidgetProvider"
@@ -124,6 +132,19 @@ widget_receiver = """\
 if ".WidgetProvider" not in text:
     text = text.replace("    </application>", widget_receiver + "\n    </application>")
     print("[patch_android] AndroidManifest.xml: WidgetProvider receiver added")
+
+boot_receiver = """\
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>"""
+
+if ".BootReceiver" not in text:
+    text = text.replace("    </application>", boot_receiver + "\n    </application>")
+    print("[patch_android] AndroidManifest.xml: BootReceiver added")
 
 manifest.write_text(text, encoding="utf-8")
 

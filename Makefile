@@ -22,9 +22,10 @@ get:
 	$(FLUTTER) pub get
 
 gen: get
-	dart run build_runner build --force-jit
+	$(FLUTTER) pub run build_runner build --force-jit --delete-conflicting-outputs
 
 apk: gen
+	python patch_android.py
 	$(FLUTTER) build apk --release
 	@echo "APK -> build/app/outputs/flutter-apk/app-release.apk"
 
