@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/domain.dart';
 
-// ---------------------------------------------------------------------------
-// Notification action IDs — matched in the response callback.
-// ---------------------------------------------------------------------------
 const _kActionSpending = 'add_spending';
 const _kActionEarning = 'add_earning';
 const _kActionTransfer = 'add_transfer';
 
-const _kChannelId = 'myfinance_quick_add';
+// v2 channel: IMPORTANCE_DEFAULT (no sound) — replaces v1 (IMPORTANCE_LOW)
+// which was invisible on Vivo OriginOS and other Chinese OEM skins.
+const _kChannelId = 'myfinance_quick_add_v2';
 const _kNotifId = 1;
 
-// Global navigator key so the notification callback can push a route even
-// when the app is in the background (but still alive).
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class NotificationService {
@@ -23,29 +21,37 @@ class NotificationService {
 
   final _plugin = FlutterLocalNotificationsPlugin();
 
-  Future<void> init() async {
+  /// Initialise the plugin and, if [enabled] is true, request POST_NOTIFICATIONS
+  /// permission (Android 13+) before showing the persistent notification.
+  Future<void> init({bool enabled = true}) async {
     const androidInit = AndroidInitializationSettings('ic_notif');
-    const initSettings = InitializationSettings(android: androidInit);
-
     await _plugin.initialize(
-      initSettings,
+      const InitializationSettings(android: androidInit),
       onDidReceiveNotificationResponse: _onResponse,
       onDidReceiveBackgroundNotificationResponse: _onResponseBackground,
     );
 
-    // Request POST_NOTIFICATIONS permission (Android 13+).
-    // Wrapped individually — failure here must not block the persistent
-    // notification on older Android versions.
-    try {
-      final androidPlugin =
-          _plugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
-      await androidPlugin?.requestNotificationsPermission();
-    } catch (_) {}
+    if (!enabled) {
+      await cancelPersistentNotification();
+      return;
+    }
 
-    try {
+    // Request POST_NOTIFICATIONS — permission_handler triggers the system dialog.
+    final status = await Permission.notification.status;
+    if (status.isDenied) {
+      await Permission.notification.request();
+    }
+
+    // Show if not permanently blocked — let the platform silently drop it if
+    // the user has revoked permission rather than our code gate preventing it.
+    final currentStatus = await Permission.notification.status;
+    if (!currentStatus.isPermanentlyDenied) {
       await showPersistentNotification();
-    } catch (_) {}
+    }
+  }
+
+  Future<void> cancelPersistentNotification() async {
+    await _plugin.cancel(_kNotifId);
   }
 
   Future<void> showPersistentNotification() async {
@@ -53,8 +59,14 @@ class NotificationService {
       _kChannelId,
       'Thêm nhanh',
       channelDescription: 'Nút thêm giao dịch nhanh từ thanh thông báo',
-      importance: Importance.low,
+      // IMPORTANCE_DEFAULT makes the channel visible on all OEM skins.
+      // Sound and vibration are disabled so it stays non-intrusive.
+      importance: Importance.defaultImportance,
       priority: Priority.low,
+      playSound: false,
+      enableVibration: false,
+      enableLights: false,
+      channelShowBadge: false,
       ongoing: true,
       autoCancel: false,
       showWhen: false,
@@ -78,31 +90,23 @@ class NotificationService {
   }
 
   void _onResponse(NotificationResponse response) {
-    final type = _typeFromAction(response.actionId ?? '');
-    _navigate(type);
+    _navigate(_typeFromAction(response.actionId ?? ''));
+    // Vivo OriginOS (and some other OEM skins) dismiss the notification when
+    // any action button is tapped, ignoring ongoing:true. Re-post immediately.
+    showPersistentNotification();
   }
 
   void _navigate(String? type) {
-    final nav = navigatorKey.currentState;
-    if (nav == null) return;
-    // Import lazily to avoid circular dependency.
-    // ignore: avoid_dynamic_calls
-    nav.pushNamed('/quick-add', arguments: type);
+    navigatorKey.currentState?.pushNamed('/quick-add', arguments: type);
   }
 }
 
-// Top-level (isolate-safe) background callback.
 @pragma('vm:entry-point')
-void _onResponseBackground(NotificationResponse response) {
-  // When the app is fully terminated, the tap will cold-start it via
-  // MainActivity's intent — nothing to do here.
-}
+void _onResponseBackground(NotificationResponse response) {}
 
-String? _typeFromAction(String actionId) {
-  return switch (actionId) {
-    _kActionSpending => TxTypes.spending,
-    _kActionEarning => TxTypes.earning,
-    _kActionTransfer => TxTypes.transfer,
-    _ => null,
-  };
-}
+String? _typeFromAction(String actionId) => switch (actionId) {
+      _kActionSpending => TxTypes.spending,
+      _kActionEarning => TxTypes.earning,
+      _kActionTransfer => TxTypes.transfer,
+      _ => null,
+    };
