@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/database.dart';
+import '../models/domain.dart';
 
 class ImportResult {
   final int added;
@@ -15,13 +16,20 @@ class ImportResult {
   const ImportResult(this.added, this.skipped);
 }
 
+/// Thrown by [CsvService.importMerge] when [CsvImportMode.reconstructBalance]
+/// is requested but the target wallet already has balance-affecting transactions.
+/// Reconstructing into a non-empty wallet would double-count.
+class NonEmptyWalletReconstructError implements Exception {
+  final String walletId;
+  const NonEmptyWalletReconstructError(this.walletId);
+}
+
 class CsvService {
   CsvService(this.db);
   final AppDatabase db;
 
   /// Exports two CSVs (transactions + wallets) and returns them for the share
-  /// sheet. Now includes wallet_from_name and wallet_to_name snapshot columns
-  /// so that a restore can recover readable wallet names even if wallets change.
+  /// sheet. Includes source and affects_balance columns added in Phase 3.
   Future<List<XFile>> export() async {
     final txList = await db.allTxns();
     final wList = await db.allWallets();
@@ -32,6 +40,7 @@ class CsvService {
         'wallet_id', 'wallet_to_id',
         'wallet_from_name', 'wallet_to_name',
         'category', 'timestamp', 'imported', 'starred',
+        'source', 'affects_balance',
       ],
       for (final t in txList)
         [
@@ -42,6 +51,8 @@ class CsvService {
           t.timestamp.toIso8601String(),
           t.imported ? 1 : 0,
           t.starred ? 1 : 0,
+          t.source.name,
+          t.affectsBalance ? 1 : 0,
         ],
     ];
 
@@ -62,9 +73,18 @@ class CsvService {
   }
 
   /// Merge-by-id import of a transactions CSV. Rows whose id already exists
-  /// are skipped. New rows are flagged `imported` (archive-only: excluded from
-  /// balance and analytics). Reads wallet name snapshot columns when present.
-  Future<ImportResult> importMerge(String path) async {
+  /// are skipped. New rows are stamped [SourceType.csvImport] and [imported=true].
+  ///
+  /// [mode] controls balance participation:
+  /// - [CsvImportMode.contextOnly] (default): rows are archive-only
+  ///   (`affectsBalance=false`). The wallet's current balance is unchanged.
+  /// - [CsvImportMode.reconstructBalance]: rows affect the balance
+  ///   (`affectsBalance=true`). Throws [NonEmptyWalletReconstructError] if any
+  ///   target wallet already has balance-affecting transactions.
+  Future<ImportResult> importMerge(
+    String path, {
+    CsvImportMode mode = CsvImportMode.contextOnly,
+  }) async {
     final content = await File(path).readAsString();
     final rows = const CsvToListConverter().convert(content);
     if (rows.length < 2) return const ImportResult(0, 0);
@@ -78,13 +98,28 @@ class CsvService {
       return r[i].toString().trim();
     }
 
-    final existing = (await db.allTxns()).map((t) => t.id).toSet();
+    final dataRows = rows.skip(1).toList();
+    final allExisting = await db.allTxns();
+    final existingIds = allExisting.map((t) => t.id).toSet();
+
+    if (mode == CsvImportMode.reconstructBalance) {
+      final csvWalletIds = dataRows
+          .map((r) => cell(r, 'wallet_id'))
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final conflict = allExisting
+          .where((t) => csvWalletIds.contains(t.walletId) && t.affectsBalance)
+          .firstOrNull;
+      if (conflict != null) throw NonEmptyWalletReconstructError(conflict.walletId);
+    }
+
     final now = DateTime.now();
+    final affects = mode == CsvImportMode.reconstructBalance;
     var added = 0, skipped = 0;
 
-    for (final r in rows.skip(1)) {
+    for (final r in dataRows) {
       final id = cell(r, 'id');
-      if (id.isEmpty || existing.contains(id)) {
+      if (id.isEmpty || existingIds.contains(id)) {
         skipped++;
         continue;
       }
@@ -110,16 +145,18 @@ class CsvService {
             timestamp: ts,
             createdAt: now,
             imported: const Value(true),
+            source: const Value(SourceType.csvImport),
+            affectsBalance: Value(affects),
           ));
-      existing.add(id);
+      existingIds.add(id);
       added++;
     }
     return ImportResult(added, skipped);
   }
 
   /// Full restore: delete all local data then insert wallets + transactions
-  /// from the given CSV paths. Transactions are NOT flagged as imported —
-  /// they restore full balance/analytics participation.
+  /// from the given CSV paths. Transactions are stamped [SourceType.csvImport]
+  /// with [affectsBalance=true] — they restore full balance participation.
   Future<ImportResult> importReplace(
       String walletsPath, String txnsPath) async {
     await db.delete(db.txns).go();
@@ -190,6 +227,8 @@ class CsvService {
             starred: Value(starred),
             timestamp: ts,
             createdAt: now,
+            source: const Value(SourceType.csvImport),
+            affectsBalance: const Value(true),
           ));
       added++;
     }
