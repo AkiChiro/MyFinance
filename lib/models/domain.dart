@@ -54,3 +54,8 @@ class WalletKinds {
   static const labels = {cash: 'Tiền mặt', bank: 'Ngân hàng'};
   static String label(String id) => labels[id] ?? id;
 }
+
+// Append-only: stored by name (textEnum). Never reorder, remove, or rename.
+enum SourceType { manual, csvImport, bankNotification }
+
+enum CsvImportMode { contextOnly, reconstructBalance }
