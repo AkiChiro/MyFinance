@@ -128,18 +128,42 @@ void main() {
     expect(txnMap['t5']!.affectsBalance, isFalse,
         reason: 'imported transfer must not affect balance');
 
-    // ── Phase 4: Assert balance preservation ─────────────────────────────────
-    // Pre-migration: w1 balance = 500000 - 100000 (t1) + 200000 (t2) = 600000
-    //                (t3, t4, t5 were excluded because imported=true)
-    // Post-migration: same result — t1/t2 have affectsBalance=true; t3/t4/t5 don't
+    // ── Phase 4: Assert balance preservation (old rule == new rule) ──────────
+    // The money guarantee: every wallet's balance must be identical when
+    // computed with the OLD imported-flag rule (as it ran before migration) and
+    // the NEW affectsBalance rule (as it runs after migration).
+    //
+    // imported is still present in v3, so we can run both rules on the same
+    // post-migration data and assert they match — no hardcoded expectations.
     final repo = FinanceRepository(db);
     final allTxns = await db.allTxns();
     final wallets = {for (final w in await db.allWallets()) w.id: w};
 
-    expect(repo.balanceOf(wallets['w1']!, allTxns), 600000,
-        reason: 'w1 balance must be unchanged after migration');
-    expect(repo.balanceOf(wallets['w2']!, allTxns), 0,
-        reason: 'w2 received no affectsBalance transactions');
+    // Inline replica of the PRE-migration balanceOf rule.
+    int oldRuleBalance(Wallet w, List<Txn> txns) {
+      var bal = w.initialBalance;
+      for (final t in txns) {
+        if (t.imported) continue; // ← rule that ran before migration
+        switch (t.type) {
+          case 'spending':
+            if (t.walletId == w.id) bal -= t.amount;
+          case 'earning':
+            if (t.walletId == w.id) bal += t.amount;
+          case 'transfer':
+            if (t.walletId == w.id) bal -= t.amount;
+            if (t.walletToId == w.id) bal += t.amount;
+        }
+      }
+      return bal;
+    }
+
+    for (final w in wallets.values) {
+      expect(
+        repo.balanceOf(w, allTxns),
+        oldRuleBalance(w, allTxns),
+        reason: 'wallet ${w.id} balance must be identical under old and new rule',
+      );
+    }
 
     await db.close();
   });
