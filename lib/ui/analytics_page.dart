@@ -1,10 +1,11 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
-import '../main.dart' show repository;
 import '../models/domain.dart';
+import '../providers.dart';
 
 // ---------------------------------------------------------------------------
 // Category colours
@@ -59,7 +60,7 @@ class _Stats {
     final ecat = <String, int>{};
 
     for (final t in txns) {
-      if (t.imported) continue;
+      if (!t.affectsBalance) continue;
       if (t.type == TxTypes.transfer) continue;
 
       final inCurr =
@@ -103,14 +104,14 @@ class _Stats {
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-class AnalyticsPage extends StatefulWidget {
+class AnalyticsPage extends ConsumerStatefulWidget {
   const AnalyticsPage({super.key});
 
   @override
-  State<AnalyticsPage> createState() => _AnalyticsPageState();
+  ConsumerState<AnalyticsPage> createState() => _AnalyticsPageState();
 }
 
-class _AnalyticsPageState extends State<AnalyticsPage> {
+class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
   late DateTime _month;
 
   @override
@@ -129,42 +130,53 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Txn>>(
-      stream: repository.watchTxns(),
-      builder: (context, snap) {
-        final txns = snap.data ?? const [];
-        final s = _Stats.fromTxns(txns, _month);
+    final repo = ref.read(repositoryProvider);
+    return StreamBuilder<List<AppCategory>>(
+      stream: repo.watchAllCategories(),
+      builder: (context, catSnap) {
+        final catLabels = {
+          for (final c in catSnap.data ?? const <AppCategory>[]) c.id: c.label
+        };
+        return StreamBuilder<List<Txn>>(
+          stream: repo.watchTxns(),
+          builder: (context, snap) {
+            final txns = snap.data ?? const [];
+            final s = _Stats.fromTxns(txns, _month);
 
-        return ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
-            const SizedBox(height: 12),
-            _SummaryCards(stats: s),
-            const SizedBox(height: 16),
-            _BarSection(stats: s, month: _month),
-            const SizedBox(height: 16),
-            if (s.spendByCat.isNotEmpty) ...[
-              _PieSection(
-                title: 'Chi tiêu theo danh mục',
-                data: s.spendByCat,
-                total: s.spending,
-                colorOf: _spendColor,
-              ),
-              const SizedBox(height: 16),
-            ],
-            if (s.earnByCat.isNotEmpty) ...[
-              _PieSection(
-                title: 'Thu nhập theo danh mục',
-                data: s.earnByCat,
-                total: s.earning,
-                colorOf: _earnColor,
-              ),
-              const SizedBox(height: 16),
-            ],
-            _YearCard(stats: s, year: _month.year),
-            const SizedBox(height: 80),
-          ],
+            return ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
+                const SizedBox(height: 12),
+                _SummaryCards(stats: s),
+                const SizedBox(height: 16),
+                _BarSection(stats: s, month: _month),
+                const SizedBox(height: 16),
+                if (s.spendByCat.isNotEmpty) ...[
+                  _PieSection(
+                    title: 'Chi tiêu theo danh mục',
+                    data: s.spendByCat,
+                    total: s.spending,
+                    colorOf: _spendColor,
+                    catLabels: catLabels,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (s.earnByCat.isNotEmpty) ...[
+                  _PieSection(
+                    title: 'Thu nhập theo danh mục',
+                    data: s.earnByCat,
+                    total: s.earning,
+                    colorOf: _earnColor,
+                    catLabels: catLabels,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _YearCard(stats: s, year: _month.year),
+                const SizedBox(height: 80),
+              ],
+            );
+          },
         );
       },
     );
@@ -499,11 +511,13 @@ class _PieSection extends StatefulWidget {
     required this.data,
     required this.total,
     required this.colorOf,
+    required this.catLabels,
   });
   final String title;
   final Map<String, int> data;
   final int total;
   final Color Function(String) colorOf;
+  final Map<String, String> catLabels;
 
   @override
   State<_PieSection> createState() => _PieSectionState();
@@ -593,7 +607,8 @@ class _PieSectionState extends State<_PieSection> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                Categories.label(e.key),
+                                widget.catLabels[e.key] ??
+                                    Categories.label(e.key),
                                 style: const TextStyle(fontSize: 12),
                                 overflow: TextOverflow.ellipsis,
                               ),

@@ -58,6 +58,12 @@ class FinanceRepository {
   Future<void> updateCategory(AppCategory cat) =>
       db.update(db.appCategories).replace(cat);
 
+  Future<List<AppCategory>> allActiveCategories() => db.allActiveCategories();
+
+  // No archived filter — used to build label maps for rendering historical txns.
+  Stream<List<AppCategory>> watchAllCategories() => db.watchAllCategories();
+  Future<List<AppCategory>> allCategories() => db.allCategories();
+
   Future<void> archiveCategory(String id) =>
       (db.update(db.appCategories)..where((c) => c.id.equals(id)))
           .write(const AppCategoriesCompanion(archived: Value(true)));
@@ -75,7 +81,7 @@ class FinanceRepository {
   int balanceOf(Wallet w, List<Txn> txns) {
     var bal = w.initialBalance;
     for (final t in txns) {
-      if (t.imported) continue;
+      if (!t.affectsBalance) continue;
       switch (t.type) {
         case TxTypes.spending:
           if (t.walletId == w.id) bal -= t.amount;
@@ -135,18 +141,20 @@ class FinanceRepository {
     String? description,
     DateTime? timestamp,
   }) async {
-    await _assertSufficient(walletId, amount);
-    final now = DateTime.now();
-    await db.into(db.txns).insert(TxnsCompanion.insert(
-          id: _uuid.v4(),
-          type: TxTypes.spending,
-          amount: amount,
-          description: Value(description),
-          walletId: walletId,
-          category: Value(category),
-          timestamp: timestamp ?? now,
-          createdAt: now,
-        ));
+    await db.transaction(() async {
+      await _assertSufficient(walletId, amount);
+      final now = DateTime.now();
+      await db.into(db.txns).insert(TxnsCompanion.insert(
+            id: _uuid.v4(),
+            type: TxTypes.spending,
+            amount: amount,
+            description: Value(description),
+            walletId: walletId,
+            category: Value(category),
+            timestamp: timestamp ?? now,
+            createdAt: now,
+          ));
+    });
   }
 
   Future<void> addEarning({
@@ -175,26 +183,30 @@ class FinanceRepository {
     required String toWalletId,
     DateTime? timestamp,
   }) async {
-    await _assertSufficient(fromWalletId, amount);
-    final now = DateTime.now();
-    await db.into(db.txns).insert(TxnsCompanion.insert(
-          id: _uuid.v4(),
-          type: TxTypes.transfer,
-          amount: amount,
-          walletId: fromWalletId,
-          walletToId: Value(toWalletId),
-          timestamp: timestamp ?? now,
-          createdAt: now,
-        ));
+    await db.transaction(() async {
+      await _assertSufficient(fromWalletId, amount);
+      final now = DateTime.now();
+      await db.into(db.txns).insert(TxnsCompanion.insert(
+            id: _uuid.v4(),
+            type: TxTypes.transfer,
+            amount: amount,
+            walletId: fromWalletId,
+            walletToId: Value(toWalletId),
+            timestamp: timestamp ?? now,
+            createdAt: now,
+          ));
+    });
   }
 
   // ── Edit / delete ────────────────────────────────────────────────────────────
 
   Future<void> updateTxn(Txn t) async {
-    if (t.type == TxTypes.spending || t.type == TxTypes.transfer) {
-      await _assertSufficient(t.walletId, t.amount, excludeId: t.id);
-    }
-    await db.update(db.txns).replace(t);
+    await db.transaction(() async {
+      if (t.type == TxTypes.spending || t.type == TxTypes.transfer) {
+        await _assertSufficient(t.walletId, t.amount, excludeId: t.id);
+      }
+      await db.update(db.txns).replace(t);
+    });
   }
 
   Future<void> deleteTxn(String id) =>
