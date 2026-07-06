@@ -359,6 +359,23 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
       'wallet_to_name', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   @override
+  late final GeneratedColumnWithTypeConverter<SourceType, String> source =
+      GeneratedColumn<String>('source', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('manual'))
+          .withConverter<SourceType>($TxnsTable.$convertersource);
+  static const VerificationMeta _affectsBalanceMeta =
+      const VerificationMeta('affectsBalance');
+  @override
+  late final GeneratedColumn<bool> affectsBalance = GeneratedColumn<bool>(
+      'affects_balance', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("affects_balance" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  @override
   List<GeneratedColumn> get $columns => [
         id,
         type,
@@ -372,7 +389,9 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
         imported,
         starred,
         walletFromName,
-        walletToName
+        walletToName,
+        source,
+        affectsBalance
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -455,6 +474,12 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
           walletToName.isAcceptableOrUnknown(
               data['wallet_to_name']!, _walletToNameMeta));
     }
+    if (data.containsKey('affects_balance')) {
+      context.handle(
+          _affectsBalanceMeta,
+          affectsBalance.isAcceptableOrUnknown(
+              data['affects_balance']!, _affectsBalanceMeta));
+    }
     return context;
   }
 
@@ -490,6 +515,10 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
           DriftSqlType.string, data['${effectivePrefix}wallet_from_name']),
       walletToName: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}wallet_to_name']),
+      source: $TxnsTable.$convertersource.fromSql(attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}source'])!),
+      affectsBalance: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}affects_balance'])!,
     );
   }
 
@@ -497,6 +526,9 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
   $TxnsTable createAlias(String alias) {
     return $TxnsTable(attachedDatabase, alias);
   }
+
+  static JsonTypeConverter2<SourceType, String, String> $convertersource =
+      const EnumNameConverter<SourceType>(SourceType.values);
 }
 
 class Txn extends DataClass implements Insertable<Txn> {
@@ -517,6 +549,8 @@ class Txn extends DataClass implements Insertable<Txn> {
 
   /// Snapshot of the destination wallet name at CSV-import time.
   final String? walletToName;
+  final SourceType source;
+  final bool affectsBalance;
   const Txn(
       {required this.id,
       required this.type,
@@ -530,7 +564,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       required this.imported,
       required this.starred,
       this.walletFromName,
-      this.walletToName});
+      this.walletToName,
+      required this.source,
+      required this.affectsBalance});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -557,6 +593,11 @@ class Txn extends DataClass implements Insertable<Txn> {
     if (!nullToAbsent || walletToName != null) {
       map['wallet_to_name'] = Variable<String>(walletToName);
     }
+    {
+      map['source'] =
+          Variable<String>($TxnsTable.$convertersource.toSql(source));
+    }
+    map['affects_balance'] = Variable<bool>(affectsBalance);
     return map;
   }
 
@@ -585,6 +626,8 @@ class Txn extends DataClass implements Insertable<Txn> {
       walletToName: walletToName == null && nullToAbsent
           ? const Value.absent()
           : Value(walletToName),
+      source: Value(source),
+      affectsBalance: Value(affectsBalance),
     );
   }
 
@@ -605,6 +648,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       starred: serializer.fromJson<bool>(json['starred']),
       walletFromName: serializer.fromJson<String?>(json['walletFromName']),
       walletToName: serializer.fromJson<String?>(json['walletToName']),
+      source: $TxnsTable.$convertersource
+          .fromJson(serializer.fromJson<String>(json['source'])),
+      affectsBalance: serializer.fromJson<bool>(json['affectsBalance']),
     );
   }
   @override
@@ -624,6 +670,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       'starred': serializer.toJson<bool>(starred),
       'walletFromName': serializer.toJson<String?>(walletFromName),
       'walletToName': serializer.toJson<String?>(walletToName),
+      'source':
+          serializer.toJson<String>($TxnsTable.$convertersource.toJson(source)),
+      'affectsBalance': serializer.toJson<bool>(affectsBalance),
     };
   }
 
@@ -640,7 +689,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           bool? imported,
           bool? starred,
           Value<String?> walletFromName = const Value.absent(),
-          Value<String?> walletToName = const Value.absent()}) =>
+          Value<String?> walletToName = const Value.absent(),
+          SourceType? source,
+          bool? affectsBalance}) =>
       Txn(
         id: id ?? this.id,
         type: type ?? this.type,
@@ -657,6 +708,8 @@ class Txn extends DataClass implements Insertable<Txn> {
             walletFromName.present ? walletFromName.value : this.walletFromName,
         walletToName:
             walletToName.present ? walletToName.value : this.walletToName,
+        source: source ?? this.source,
+        affectsBalance: affectsBalance ?? this.affectsBalance,
       );
   Txn copyWithCompanion(TxnsCompanion data) {
     return Txn(
@@ -679,6 +732,10 @@ class Txn extends DataClass implements Insertable<Txn> {
       walletToName: data.walletToName.present
           ? data.walletToName.value
           : this.walletToName,
+      source: data.source.present ? data.source.value : this.source,
+      affectsBalance: data.affectsBalance.present
+          ? data.affectsBalance.value
+          : this.affectsBalance,
     );
   }
 
@@ -697,7 +754,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           ..write('imported: $imported, ')
           ..write('starred: $starred, ')
           ..write('walletFromName: $walletFromName, ')
-          ..write('walletToName: $walletToName')
+          ..write('walletToName: $walletToName, ')
+          ..write('source: $source, ')
+          ..write('affectsBalance: $affectsBalance')
           ..write(')'))
         .toString();
   }
@@ -716,7 +775,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       imported,
       starred,
       walletFromName,
-      walletToName);
+      walletToName,
+      source,
+      affectsBalance);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -733,7 +794,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           other.imported == this.imported &&
           other.starred == this.starred &&
           other.walletFromName == this.walletFromName &&
-          other.walletToName == this.walletToName);
+          other.walletToName == this.walletToName &&
+          other.source == this.source &&
+          other.affectsBalance == this.affectsBalance);
 }
 
 class TxnsCompanion extends UpdateCompanion<Txn> {
@@ -750,6 +813,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
   final Value<bool> starred;
   final Value<String?> walletFromName;
   final Value<String?> walletToName;
+  final Value<SourceType> source;
+  final Value<bool> affectsBalance;
   final Value<int> rowid;
   const TxnsCompanion({
     this.id = const Value.absent(),
@@ -765,6 +830,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     this.starred = const Value.absent(),
     this.walletFromName = const Value.absent(),
     this.walletToName = const Value.absent(),
+    this.source = const Value.absent(),
+    this.affectsBalance = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TxnsCompanion.insert({
@@ -781,6 +848,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     this.starred = const Value.absent(),
     this.walletFromName = const Value.absent(),
     this.walletToName = const Value.absent(),
+    this.source = const Value.absent(),
+    this.affectsBalance = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         type = Value(type),
@@ -802,6 +871,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     Expression<bool>? starred,
     Expression<String>? walletFromName,
     Expression<String>? walletToName,
+    Expression<String>? source,
+    Expression<bool>? affectsBalance,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -818,6 +889,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       if (starred != null) 'starred': starred,
       if (walletFromName != null) 'wallet_from_name': walletFromName,
       if (walletToName != null) 'wallet_to_name': walletToName,
+      if (source != null) 'source': source,
+      if (affectsBalance != null) 'affects_balance': affectsBalance,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -836,6 +909,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       Value<bool>? starred,
       Value<String?>? walletFromName,
       Value<String?>? walletToName,
+      Value<SourceType>? source,
+      Value<bool>? affectsBalance,
       Value<int>? rowid}) {
     return TxnsCompanion(
       id: id ?? this.id,
@@ -851,6 +926,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       starred: starred ?? this.starred,
       walletFromName: walletFromName ?? this.walletFromName,
       walletToName: walletToName ?? this.walletToName,
+      source: source ?? this.source,
+      affectsBalance: affectsBalance ?? this.affectsBalance,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -897,6 +974,13 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     if (walletToName.present) {
       map['wallet_to_name'] = Variable<String>(walletToName.value);
     }
+    if (source.present) {
+      map['source'] =
+          Variable<String>($TxnsTable.$convertersource.toSql(source.value));
+    }
+    if (affectsBalance.present) {
+      map['affects_balance'] = Variable<bool>(affectsBalance.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -919,6 +1003,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
           ..write('starred: $starred, ')
           ..write('walletFromName: $walletFromName, ')
           ..write('walletToName: $walletToName, ')
+          ..write('source: $source, ')
+          ..write('affectsBalance: $affectsBalance, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1487,6 +1573,8 @@ typedef $$TxnsTableCreateCompanionBuilder = TxnsCompanion Function({
   Value<bool> starred,
   Value<String?> walletFromName,
   Value<String?> walletToName,
+  Value<SourceType> source,
+  Value<bool> affectsBalance,
   Value<int> rowid,
 });
 typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
@@ -1503,6 +1591,8 @@ typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
   Value<bool> starred,
   Value<String?> walletFromName,
   Value<String?> walletToName,
+  Value<SourceType> source,
+  Value<bool> affectsBalance,
   Value<int> rowid,
 });
 
@@ -1553,6 +1643,15 @@ class $$TxnsTableFilterComposer extends Composer<_$AppDatabase, $TxnsTable> {
 
   ColumnFilters<String> get walletToName => $composableBuilder(
       column: $table.walletToName, builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<SourceType, SourceType, String> get source =>
+      $composableBuilder(
+          column: $table.source,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnFilters<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance,
+      builder: (column) => ColumnFilters(column));
 }
 
 class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
@@ -1603,6 +1702,13 @@ class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
   ColumnOrderings<String> get walletToName => $composableBuilder(
       column: $table.walletToName,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get source => $composableBuilder(
+      column: $table.source, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$TxnsTableAnnotationComposer
@@ -1652,6 +1758,12 @@ class $$TxnsTableAnnotationComposer
 
   GeneratedColumn<String> get walletToName => $composableBuilder(
       column: $table.walletToName, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<SourceType, String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance, builder: (column) => column);
 }
 
 class $$TxnsTableTableManager extends RootTableManager<
@@ -1690,6 +1802,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             Value<bool> starred = const Value.absent(),
             Value<String?> walletFromName = const Value.absent(),
             Value<String?> walletToName = const Value.absent(),
+            Value<SourceType> source = const Value.absent(),
+            Value<bool> affectsBalance = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion(
@@ -1706,6 +1820,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             starred: starred,
             walletFromName: walletFromName,
             walletToName: walletToName,
+            source: source,
+            affectsBalance: affectsBalance,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1722,6 +1838,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             Value<bool> starred = const Value.absent(),
             Value<String?> walletFromName = const Value.absent(),
             Value<String?> walletToName = const Value.absent(),
+            Value<SourceType> source = const Value.absent(),
+            Value<bool> affectsBalance = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion.insert(
@@ -1738,6 +1856,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             starred: starred,
             walletFromName: walletFromName,
             walletToName: walletToName,
+            source: source,
+            affectsBalance: affectsBalance,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

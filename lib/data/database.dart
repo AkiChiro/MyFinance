@@ -5,6 +5,8 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/domain.dart';
+
 part 'database.g.dart';
 
 // ── Tables ────────────────────────────────────────────────────────────────────
@@ -37,6 +39,10 @@ class Txns extends Table {
   TextColumn get walletFromName => text().nullable()();
   /// Snapshot of the destination wallet name at CSV-import time.
   TextColumn get walletToName => text().nullable()();
+  // §3 additions (Phase 3)
+  TextColumn get source =>
+      textEnum<SourceType>().withDefault(const Constant('manual'))();
+  BoolColumn get affectsBalance => boolean().withDefault(const Constant(true))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -64,8 +70,11 @@ class AppCategories extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  /// In-memory database for unit tests — skips the file-system open.
+  AppDatabase.forTesting(super.e);
+
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -80,6 +89,16 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(txns, txns.walletToName);
             await m.createTable(appCategories);
             await _seedCategories();
+          }
+          if (from < 3) {
+            await m.addColumn(txns, txns.source);
+            await m.addColumn(txns, txns.affectsBalance);
+            // Backfill from imported flag:
+            //   imported=true  → source='csvImport', affects_balance=0
+            //   imported=false → source='manual',    affects_balance=1
+            await customStatement(
+              "UPDATE txns SET source = 'csvImport', affects_balance = 0 WHERE imported = 1",
+            );
           }
         },
       );
@@ -134,7 +153,7 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Txn>> allTxns() => select(txns).get();
 
   Future<List<Txn>> nativeTxns() =>
-      (select(txns)..where((t) => t.imported.equals(false))).get();
+      (select(txns)..where((t) => t.affectsBalance.equals(true))).get();
 
   // ── Categories ────────────────────────────────────────────────────────────────
 
@@ -160,6 +179,18 @@ class AppDatabase extends _$AppDatabase {
     final cats = await activeCategories(kind);
     return {for (final c in cats) c.id: c.threshold};
   }
+
+  // No archived filter — used for rendering labels on historical transactions
+  // (including categories that have since been soft-deleted / archived).
+  Stream<List<AppCategory>> watchAllCategories() =>
+      (select(appCategories)
+            ..orderBy([(c) => OrderingTerm(expression: c.sortOrder)]))
+          .watch();
+
+  Future<List<AppCategory>> allCategories() =>
+      (select(appCategories)
+            ..orderBy([(c) => OrderingTerm(expression: c.sortOrder)]))
+          .get();
 }
 
 LazyDatabase _openConnection() {
