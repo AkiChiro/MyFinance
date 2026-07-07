@@ -1,24 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
-import '../main.dart' show repository, settings;
 import '../models/domain.dart';
+import '../providers.dart';
 import '../repositories/finance_repository.dart';
+import 'captures_page.dart';
 import 'quick_add_page.dart';
 
-class TransactionsPage extends StatefulWidget {
+class TransactionsPage extends ConsumerStatefulWidget {
   const TransactionsPage({super.key});
 
   @override
-  State<TransactionsPage> createState() => _TransactionsPageState();
+  ConsumerState<TransactionsPage> createState() => _TransactionsPageState();
 }
 
-class _TransactionsPageState extends State<TransactionsPage> {
+class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   bool _starredOnly = false;
 
   @override
   Widget build(BuildContext context) {
+    final repo = ref.read(repositoryProvider);
+    final settings = ref.watch(settingsProvider);
     return Column(
       children: [
         // ── Filter bar ───────────────────────────────────────────────────────
@@ -47,51 +51,90 @@ class _TransactionsPageState extends State<TransactionsPage> {
             ],
           ),
         ),
+        // ── Captures banner ──────────────────────────────────────────────────
+        StreamBuilder<int>(
+          stream: repo.pendingCaptureCount(),
+          builder: (context, snap) {
+            final count = snap.data ?? 0;
+            if (count == 0) return const SizedBox.shrink();
+            final scheme = Theme.of(context).colorScheme;
+            return Card(
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              color: scheme.primaryContainer,
+              child: ListTile(
+                leading: Badge(
+                  label: Text('$count'),
+                  child: Icon(Icons.notifications_outlined,
+                      color: scheme.onPrimaryContainer),
+                ),
+                title: Text(
+                  '$count thông báo ngân hàng chờ xác nhận',
+                  style: TextStyle(color: scheme.onPrimaryContainer),
+                ),
+                trailing:
+                    Icon(Icons.chevron_right, color: scheme.onPrimaryContainer),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CapturesPage()),
+                ),
+              ),
+            );
+          },
+        ),
         // ── List ─────────────────────────────────────────────────────────────
         Expanded(
-          child: StreamBuilder<List<Wallet>>(
-            stream: repository.watchWallets(),
-            builder: (context, wSnap) {
-              final walletMap = {
-                for (final w in (wSnap.data ?? const [])) w.id: w.name
+          child: StreamBuilder<List<AppCategory>>(
+            stream: repo.watchAllCategories(),
+            builder: (context, catSnap) {
+              final catLabels = {
+                for (final c in catSnap.data ?? const <AppCategory>[])
+                  c.id: c.label
               };
-              // Load category thresholds for auto-star computation.
-              return FutureBuilder<Map<String, int>>(
-                future: repository.categoryThresholds(TxTypes.spending),
-                builder: (context, threshSnap) {
-                  final thresholds = threshSnap.data ?? {};
-                  return StreamBuilder<List<Txn>>(
-                    stream: repository.watchTxns(),
-                    builder: (context, tSnap) {
-                      var txns = tSnap.data ?? const [];
-                      if (_starredOnly) {
-                        txns = txns
-                            .where((t) =>
-                                t.starred ||
-                                isAutoStarred(t, thresholds,
-                                    enabled: settings.autostarEnabled))
-                            .toList();
-                      }
-                      if (txns.isEmpty) {
-                        return Center(
-                          child: Text(_starredOnly
-                              ? 'Không có giao dịch nào có sao.'
-                              : 'Chưa có giao dịch nào.'),
-                        );
-                      }
-                      return ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: txns.length,
-                        itemBuilder: (context, i) => _TxnTile(
-                          txn: txns[i],
-                          thresholds: thresholds,
-                          walletName: (id) {
-                            if (walletMap.containsKey(id)) {
-                              return walletMap[id]!;
-                            }
-                            return '(ví khác)';
-                          },
-                        ),
+              return StreamBuilder<List<Wallet>>(
+                stream: repo.watchWallets(),
+                builder: (context, wSnap) {
+                  final walletMap = {
+                    for (final w in (wSnap.data ?? const [])) w.id: w.name
+                  };
+                  // Load category thresholds for auto-star computation.
+                  return FutureBuilder<Map<String, int>>(
+                    future: repo.categoryThresholds(TxTypes.spending),
+                    builder: (context, threshSnap) {
+                      final thresholds = threshSnap.data ?? {};
+                      return StreamBuilder<List<Txn>>(
+                        stream: repo.watchTxns(),
+                        builder: (context, tSnap) {
+                          var txns = tSnap.data ?? const [];
+                          if (_starredOnly) {
+                            txns = txns
+                                .where((t) =>
+                                    t.starred ||
+                                    isAutoStarred(t, thresholds,
+                                        enabled: settings.autostarEnabled))
+                                .toList();
+                          }
+                          if (txns.isEmpty) {
+                            return Center(
+                              child: Text(_starredOnly
+                                  ? 'Không có giao dịch nào có sao.'
+                                  : 'Chưa có giao dịch nào.'),
+                            );
+                          }
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: txns.length,
+                            itemBuilder: (context, i) => _TxnTile(
+                              txn: txns[i],
+                              thresholds: thresholds,
+                              catLabels: catLabels,
+                              walletName: (id) {
+                                if (walletMap.containsKey(id)) {
+                                  return walletMap[id]!;
+                                }
+                                return '(ví khác)';
+                              },
+                            ),
+                          );
+                        },
                       );
                     },
                   );
@@ -107,19 +150,27 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
 // ── Tile ──────────────────────────────────────────────────────────────────────
 
-class _TxnTile extends StatelessWidget {
+class _TxnTile extends ConsumerWidget {
   const _TxnTile({
     required this.txn,
     required this.walletName,
     required this.thresholds,
+    required this.catLabels,
   });
 
   final Txn txn;
   final String Function(String id) walletName;
   final Map<String, int> thresholds;
+  final Map<String, String> catLabels;
+
+  String _catLabel(String? id) =>
+      id == null ? '—' : (catLabels[id] ?? Categories.label(id));
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final repo = ref.read(repositoryProvider);
+
     final scheme = Theme.of(context).colorScheme;
     final isSpending = txn.type == TxTypes.spending;
     final isTransfer = txn.type == TxTypes.transfer;
@@ -143,11 +194,11 @@ class _TxnTile extends StatelessWidget {
             '${resolveWallet(txn.walletToId, txn.walletToName)}'
         : (txn.description?.isNotEmpty == true
             ? txn.description!
-            : Categories.label(txn.category));
+            : _catLabel(txn.category));
 
     final subtitleParts = <String>[
       TxTypes.labels[txn.type] ?? txn.type,
-      if (!isTransfer) Categories.label(txn.category),
+      if (!isTransfer) _catLabel(txn.category),
       if (!isTransfer) resolveWallet(txn.walletId, txn.walletFromName),
       formatDateTime(txn.timestamp),
     ];
@@ -189,7 +240,7 @@ class _TxnTile extends StatelessWidget {
             ) ??
             false;
       },
-      onDismissed: (_) => repository.deleteTxn(txn.id),
+      onDismissed: (_) => repo.deleteTxn(txn.id),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: color.withValues(alpha: 0.12),
@@ -224,12 +275,12 @@ class _TxnTile extends StatelessWidget {
             : () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => QuickAddPage(editing: txn),
                 )),
-        onLongPress: () => _showActionSheet(context),
+        onLongPress: () => _showActionSheet(context, repo),
       ),
     );
   }
 
-  void _showActionSheet(BuildContext context) {
+  void _showActionSheet(BuildContext context, FinanceRepository repo) {
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -256,7 +307,7 @@ class _TxnTile extends StatelessWidget {
                     Text(txn.starred ? 'Bỏ đánh dấu sao' : 'Đánh dấu sao'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  repository.toggleStar(txn);
+                  repo.toggleStar(txn);
                 },
               ),
             ],
@@ -282,7 +333,7 @@ class _TxnTile extends StatelessWidget {
                     ],
                   ),
                 );
-                if (ok == true) await repository.deleteTxn(txn.id);
+                if (ok == true) await repo.deleteTxn(txn.id);
               },
             ),
           ],

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -18,7 +19,17 @@ class _Rule {
 /// It only *suggests* a category to pre-select in the form — it never files a
 /// transaction silently, so a wrong guess can't quietly skew the charts.
 class CategorySuggester {
+  CategorySuggester();
+
   List<_Rule> _rules = const [];
+
+  /// Test seam: builds a suggester from an in-memory rule list, no file I/O.
+  @visibleForTesting
+  factory CategorySuggester.fromRules(List<Map<String, dynamic>> rules) {
+    final s = CategorySuggester();
+    s._parseRaw(jsonEncode(rules));
+    return s;
+  }
 
   static Future<File> _customFile() async {
     final dir = await getApplicationDocumentsDirectory();

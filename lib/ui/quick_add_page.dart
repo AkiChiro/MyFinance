@@ -1,24 +1,25 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
-import '../main.dart' show repository, settings, suggester;
 import '../models/domain.dart';
+import '../providers.dart';
 import '../repositories/finance_repository.dart';
 
-class QuickAddPage extends StatefulWidget {
+class QuickAddPage extends ConsumerStatefulWidget {
   const QuickAddPage({super.key, this.editing, this.initialType});
 
   final Txn? editing;
   final String? initialType;
 
   @override
-  State<QuickAddPage> createState() => _QuickAddPageState();
+  ConsumerState<QuickAddPage> createState() => _QuickAddPageState();
 }
 
-class _QuickAddPageState extends State<QuickAddPage> {
+class _QuickAddPageState extends ConsumerState<QuickAddPage> {
   late String _type;
   final _amount = TextEditingController();
   final _desc = TextEditingController();
@@ -60,6 +61,7 @@ class _QuickAddPageState extends State<QuickAddPage> {
   }
 
   void _onTypeChanged(String t) {
+    final suggester = ref.read(suggesterProvider);
     setState(() {
       _type = t;
       if (_isTransfer) {
@@ -74,7 +76,7 @@ class _QuickAddPageState extends State<QuickAddPage> {
 
   void _onDescChanged(String text) {
     if (_categoryTouched || _isTransfer) return;
-    setState(() => _category = suggester.suggest(text, _type));
+    setState(() => _category = ref.read(suggesterProvider).suggest(text, _type));
   }
 
   Future<void> _pickTime() async {
@@ -103,6 +105,7 @@ class _QuickAddPageState extends State<QuickAddPage> {
   }
 
   Future<void> _save() async {
+    final repo = ref.read(repositoryProvider);
     final amount = parseAmount(_amount.text);
     if (amount <= 0) { _snack('Vui lòng nhập số tiền hợp lệ.'); return; }
     if (_walletId == null) { _snack(_isTransfer ? 'Chọn ví nguồn.' : 'Chọn ví.'); return; }
@@ -123,23 +126,23 @@ class _QuickAddPageState extends State<QuickAddPage> {
           category: Value<String?>(_isTransfer ? null : _category),
           timestamp: _timestamp,
         );
-        await repository.updateTxn(updated);
+        await repo.updateTxn(updated);
       } else {
         switch (_type) {
           case TxTypes.spending:
-            await repository.addSpending(
+            await repo.addSpending(
               amount: amount, walletId: _walletId!,
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
             );
           case TxTypes.earning:
-            await repository.addEarning(
+            await repo.addEarning(
               amount: amount, walletId: _walletId!,
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
             );
           case TxTypes.transfer:
-            await repository.addTransfer(
+            await repo.addTransfer(
               amount: amount, fromWalletId: _walletId!,
               toWalletId: _toWalletId!, timestamp: _timestamp,
             );
@@ -157,11 +160,12 @@ class _QuickAddPageState extends State<QuickAddPage> {
 
   @override
   Widget build(BuildContext context) {
-    final sym = settings.currencySymbol;
+    final repo = ref.read(repositoryProvider);
+    final sym = ref.watch(settingsProvider).currencySymbol;
     return Scaffold(
       appBar: AppBar(title: Text(_isEdit ? 'Sửa giao dịch' : 'Thêm nhanh')),
       body: StreamBuilder<List<Wallet>>(
-        stream: repository.watchWallets(),
+        stream: repo.watchWallets(),
         builder: (context, wSnap) {
           final wallets = wSnap.data ?? const [];
           if (wallets.isEmpty) {
@@ -174,7 +178,7 @@ class _QuickAddPageState extends State<QuickAddPage> {
           return StreamBuilder<List<AppCategory>>(
             stream: _isTransfer
                 ? const Stream.empty()
-                : repository.watchActiveCategories(_type),
+                : repo.watchActiveCategories(_type),
             builder: (context, catSnap) {
               // Fall back to hardcoded domain list if DB not ready yet.
               final cats = catSnap.data;

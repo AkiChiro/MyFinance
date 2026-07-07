@@ -58,4 +58,13 @@ class WalletKinds {
 // Append-only: stored by name (textEnum). Never reorder, remove, or rename.
 enum SourceType { manual, csvImport, bankNotification }
 
+// Append-only: stored by name (textEnum). Never reorder, remove, or rename.
+enum CaptureDirection { income, expense }
+
+// Append-only: stored by name (textEnum). Never reorder, remove, or rename.
+enum ParseStatus { parsed, needsReview, unparsed }
+
+// Append-only: stored by name (textEnum). Never reorder, remove, or rename.
+enum CaptureStatus { pending, confirmed, dismissed }
+
 enum CsvImportMode { contextOnly, reconstructBalance }

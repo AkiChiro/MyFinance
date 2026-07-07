@@ -186,6 +186,53 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  Future<void> _openListenerSettings() async {
+    await ref.read(captureServiceProvider).permissions.requestListenerAccess();
+  }
+
+  Future<void> _showSeenPackages() async {
+    final packages =
+        await ref.read(captureServiceProvider).seenPackages();
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gói ứng dụng đã thấy'),
+        content: packages.isEmpty
+            ? const Text(
+                'Chưa có gói nào. Cấp quyền nghe thông báo và chờ '
+                'ứng dụng ngân hàng gửi thông báo.')
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Dùng các tên gói này để xác minh BankPackages.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final pkg in packages)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: SelectableText(
+                          pkg,
+                          style: const TextStyle(fontFamily: 'monospace'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Đóng'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _editCurrencySymbol() async {
     final settings = ref.read(settingsProvider);
     final ctrl = TextEditingController(text: settings.currencySymbol);
@@ -406,6 +453,37 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             title: Text('MyFinance'),
             subtitle: Text(
                 'Phiên bản 0.2 · Hoàn toàn ngoại tuyến · Chỉ dùng VND.'),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ── Developer ─────────────────────────────────────────────────────
+        const _SectionHeader('Nhà phát triển'),
+        Card(
+          child: Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.notifications_active_outlined),
+                title: const Text('Cấp quyền nghe thông báo'),
+                subtitle: const Text(
+                  'Mở cài đặt hệ thống để bật quyền cho dịch vụ '
+                  'chụp thông báo ngân hàng (BankCaptureService).',
+                ),
+                trailing: const Icon(Icons.open_in_new_outlined),
+                onTap: _openListenerSettings,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.explore_outlined),
+                title: const Text('Gói ứng dụng đã thấy'),
+                subtitle: const Text(
+                  'Xem tên gói của các ứng dụng đã gửi thông báo — '
+                  'dùng để xác minh hằng số BankPackages.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _showSeenPackages,
+              ),
+            ],
           ),
         ),
 

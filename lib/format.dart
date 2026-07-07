@@ -40,3 +40,12 @@ int parseAmount(String raw) {
   if (digits.isEmpty) return 0;
   return int.tryParse(digits) ?? 0;
 }
+
+/// Parses a bank-notification amount substring to a positive integer VND.
+/// Strips all non-digit characters (thousand separators `.`/`,`, currency
+/// tokens `VND`/`đ`, sign `+`/`-`, and whitespace). Returns 0 for strings
+/// with no digit content (malformed or separator-only input never throws).
+/// Callers determine [CaptureDirection] from the `+`/`-` sign BEFORE calling
+/// this — the sign is a non-digit and is stripped automatically.
+/// Delegates to [parseAmount] so both paths share the same empty-string guard.
+int parseVndAmount(String raw) => parseAmount(raw);

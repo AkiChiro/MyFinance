@@ -16,6 +16,8 @@ class Wallets extends Table {
   TextColumn get name => text()();
   IntColumn get initialBalance => integer().withDefault(const Constant(0))();
   TextColumn get type => text().withDefault(const Constant('cash'))();
+  // nullable: at most one wallet maps to a given bank app package (ADR-0014).
+  TextColumn get packageName => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -48,6 +50,39 @@ class Txns extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Persistent capture table for bank notification proposals (ADR-0013).
+/// Parsed fields (amount, direction, parseStatus) are populated by later slices.
+@DataClassName('NotificationCapture')
+class NotificationCaptures extends Table {
+  TextColumn get id => text()();
+  TextColumn get packageName => text()();
+  TextColumn get rawTitle => text().nullable()();
+  TextColumn get rawText => text()();
+  DateTimeColumn get capturedAt => dateTime()();
+
+  // Parsed by later slice (5b parser):
+  IntColumn get amount => integer().nullable()();
+  TextColumn get direction => textEnum<CaptureDirection>().nullable()();
+  TextColumn get parseStatus =>
+      textEnum<ParseStatus>().withDefault(const Constant('unparsed'))();
+
+  // Suggestions (nullable, resolved on insert / by later slices):
+  TextColumn get suggestedWalletId => text().nullable()();
+  TextColumn get suggestedCategory => text().nullable()();
+
+  // Lifecycle:
+  TextColumn get status =>
+      textEnum<CaptureStatus>().withDefault(const Constant('pending'))();
+  TextColumn get resultingTxnId => text().nullable()();
+
+  // Composite dedup key: packageName + \x1e + normalizedText (not a hash —
+  // the full string is stored so the dedup query is a plain equality check).
+  TextColumn get dedupKey => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// User-editable (and default) transaction categories.
 /// id = stable string key ('necessities', 'food', …, or uuid for user-created).
 @DataClassName('AppCategory')
@@ -64,9 +99,36 @@ class AppCategories extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+// ── AnalyticsBundle ───────────────────────────────────────────────────────────
+
+/// Pre-aggregated analytics data for a given month, produced by SQL aggregates.
+/// Fields are millisecond-epoch-aligned totals; category maps use the same
+/// NULL-fallback as the Dart fold ('others' / 'others_earn').
+class AnalyticsBundle {
+  const AnalyticsBundle({
+    required this.currSpending,
+    required this.currEarning,
+    required this.prevSpending,
+    required this.prevEarning,
+    required this.yearSpending,
+    required this.yearEarning,
+    required this.spendByCat,
+    required this.earnByCat,
+  });
+
+  final int currSpending;
+  final int currEarning;
+  final int prevSpending;
+  final int prevEarning;
+  final int yearSpending;
+  final int yearEarning;
+  final Map<String, int> spendByCat;
+  final Map<String, int> earnByCat;
+}
+
 // ── Database ──────────────────────────────────────────────────────────────────
 
-@DriftDatabase(tables: [Wallets, Txns, AppCategories])
+@DriftDatabase(tables: [Wallets, Txns, AppCategories, NotificationCaptures])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
@@ -74,7 +136,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -98,6 +160,32 @@ class AppDatabase extends _$AppDatabase {
             //   imported=false → source='manual',    affects_balance=1
             await customStatement(
               "UPDATE txns SET source = 'csvImport', affects_balance = 0 WHERE imported = 1",
+            );
+          }
+          if (from < 4) {
+            // Phase 4: add partial indexes for the balance and analytics aggregates.
+            // Partial indexes keep these small (only affects_balance=1 rows matter).
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_txns_affects_wid ON txns(wallet_id) WHERE affects_balance=1',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_txns_affects_wtoid ON txns(wallet_to_id) WHERE affects_balance=1 AND wallet_to_id IS NOT NULL',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_txns_affects_ts ON txns(timestamp) WHERE affects_balance=1',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_txns_affects_type ON txns(type, timestamp) WHERE affects_balance=1',
+            );
+          }
+          if (from < 5) {
+            // Phase 5a: bank capture table + wallet↔package association (ADR-0013/14).
+            await m.addColumn(wallets, wallets.packageName);
+            await m.createTable(notificationCaptures);
+            // Partial unique index: SQLite allows multiple NULLs, so wallets without
+            // a package association coexist freely; only non-null values are unique.
+            await customStatement(
+              'CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_pkg ON wallets(package_name) WHERE package_name IS NOT NULL',
             );
           }
         },
@@ -155,6 +243,137 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Txn>> nativeTxns() =>
       (select(txns)..where((t) => t.affectsBalance.equals(true))).get();
 
+  // ── SQL balance queries ───────────────────────────────────────────────────────
+  //
+  // Transfers have a dual role: a single row subtracts from walletId and adds
+  // to walletToId. A plain GROUP BY walletId misses the incoming side.
+  // Both queries below use UNION ALL to split each transaction into signed
+  // (wid, delta) contributions, then SUM by wallet.
+
+  /// Reactive stream of {walletId → derived balance} for all wallets.
+  /// Used by the wallet list UI.
+  Stream<Map<String, int>> watchWalletBalances() =>
+      customSelect(_kAllBalancesSql, readsFrom: {wallets, txns})
+          .watch()
+          .map((rows) => {
+                for (final r in rows)
+                  r.read<String>('id'): r.read<int>('balance')
+              });
+
+  /// One-shot single-wallet balance. Pass [excludeId] on the edit path
+  /// (overspend check must ignore the transaction being updated).
+  Future<int> sqlBalance(String walletId, {String? excludeId}) async {
+    final sql = excludeId == null ? _kSingleBalanceSql : _kSingleBalanceExcludeSql;
+    final List<Variable<Object>> vars;
+    if (excludeId == null) {
+      vars = [
+        Variable<String>(walletId),
+        Variable<String>(walletId),
+        Variable<String>(walletId),
+        Variable<String>(walletId),
+        Variable<String>(walletId),
+      ];
+    } else {
+      vars = [
+        Variable<String>(walletId), Variable<String>(excludeId),
+        Variable<String>(walletId), Variable<String>(excludeId),
+        Variable<String>(walletId), Variable<String>(excludeId),
+        Variable<String>(walletId), Variable<String>(excludeId),
+        Variable<String>(walletId),
+      ];
+    }
+    final rows =
+        await customSelect(sql, variables: vars, readsFrom: {wallets, txns})
+            .get();
+    return rows.isEmpty ? 0 : rows.single.read<int>('balance');
+  }
+
+  // ── SQL analytics queries ─────────────────────────────────────────────────────
+
+  /// Reactive stream of pre-aggregated analytics for [month].
+  /// Re-emits whenever the txns table changes.
+  Stream<AnalyticsBundle> watchAnalyticsBundle(DateTime month) async* {
+    yield await _buildAnalyticsBundle(month);
+    await for (final _ in tableUpdates(TableUpdateQuery.onTable(txns))) {
+      yield await _buildAnalyticsBundle(month);
+    }
+  }
+
+  Future<AnalyticsBundle> _buildAnalyticsBundle(DateTime month) async {
+    // All boundaries are local-time Unix SECONDS (Drift 2.x stores DateTimeColumn
+    // as millisecondsSinceEpoch ~/ 1000, reads back as seconds * 1000).
+    // Using seconds matches the stored integer type exactly, preserving the same
+    // month/year boundary semantics as the Dart fold's t.timestamp.year/.month.
+    final currStart = DateTime(month.year, month.month).millisecondsSinceEpoch ~/ 1000;
+    final currEnd =
+        DateTime(month.year, month.month + 1).millisecondsSinceEpoch ~/ 1000;
+    final prevStart =
+        DateTime(month.year, month.month - 1).millisecondsSinceEpoch ~/ 1000;
+    final prevEnd = currStart; // prevMonth ends where currMonth begins
+    final yearStart = DateTime(month.year, 1).millisecondsSinceEpoch ~/ 1000;
+    final yearEnd = DateTime(month.year + 1, 1).millisecondsSinceEpoch ~/ 1000;
+
+    final totRow = await customSelect(
+      '''
+      SELECT
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='spending' THEN amount END), 0) AS curr_sp,
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='earning'  THEN amount END), 0) AS curr_ea,
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='spending' THEN amount END), 0) AS prev_sp,
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='earning'  THEN amount END), 0) AS prev_ea,
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='spending' THEN amount END), 0) AS year_sp,
+        COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='earning'  THEN amount END), 0) AS year_ea
+      FROM txns
+      WHERE affects_balance=1 AND type!='transfer'
+      ''',
+      variables: [
+        Variable<int>(currStart), Variable<int>(currEnd),
+        Variable<int>(currStart), Variable<int>(currEnd),
+        Variable<int>(prevStart), Variable<int>(prevEnd),
+        Variable<int>(prevStart), Variable<int>(prevEnd),
+        Variable<int>(yearStart), Variable<int>(yearEnd),
+        Variable<int>(yearStart), Variable<int>(yearEnd),
+      ],
+      readsFrom: {txns},
+    ).getSingle();
+
+    final spRows = await customSelect(
+      '''
+      SELECT COALESCE(category, 'others') AS cat, SUM(amount) AS total
+      FROM txns
+      WHERE affects_balance=1 AND type='spending' AND timestamp>=? AND timestamp<?
+      GROUP BY cat
+      ''',
+      variables: [Variable<int>(currStart), Variable<int>(currEnd)],
+      readsFrom: {txns},
+    ).get();
+
+    final eaRows = await customSelect(
+      '''
+      SELECT COALESCE(category, 'others_earn') AS cat, SUM(amount) AS total
+      FROM txns
+      WHERE affects_balance=1 AND type='earning' AND timestamp>=? AND timestamp<?
+      GROUP BY cat
+      ''',
+      variables: [Variable<int>(currStart), Variable<int>(currEnd)],
+      readsFrom: {txns},
+    ).get();
+
+    return AnalyticsBundle(
+      currSpending: totRow.read<int>('curr_sp'),
+      currEarning: totRow.read<int>('curr_ea'),
+      prevSpending: totRow.read<int>('prev_sp'),
+      prevEarning: totRow.read<int>('prev_ea'),
+      yearSpending: totRow.read<int>('year_sp'),
+      yearEarning: totRow.read<int>('year_ea'),
+      spendByCat: {
+        for (final r in spRows) r.read<String>('cat'): r.read<int>('total')
+      },
+      earnByCat: {
+        for (final r in eaRows) r.read<String>('cat'): r.read<int>('total')
+      },
+    );
+  }
+
   // ── Categories ────────────────────────────────────────────────────────────────
 
   Stream<List<AppCategory>> watchActiveCategories(String kind) =>
@@ -180,6 +399,24 @@ class AppDatabase extends _$AppDatabase {
     return {for (final c in cats) c.id: c.threshold};
   }
 
+  // ── NotificationCaptures ─────────────────────────────────────────────────────
+
+  Stream<List<NotificationCapture>> watchPendingCaptures() =>
+      (select(notificationCaptures)
+            ..where((c) => c.status.equals(CaptureStatus.pending.name))
+            ..orderBy([
+              (c) =>
+                  OrderingTerm(expression: c.capturedAt, mode: OrderingMode.desc)
+            ]))
+          .watch();
+
+  Stream<int> pendingCaptureCount() =>
+      watchPendingCaptures().map((list) => list.length);
+
+  Future<Wallet?> walletByPackageName(String pkgName) =>
+      (select(wallets)..where((w) => w.packageName.equals(pkgName)))
+          .getSingleOrNull();
+
   // No archived filter — used for rendering labels on historical transactions
   // (including categories that have since been soft-deleted / archived).
   Stream<List<AppCategory>> watchAllCategories() =>
@@ -192,6 +429,66 @@ class AppDatabase extends _$AppDatabase {
             ..orderBy([(c) => OrderingTerm(expression: c.sortOrder)]))
           .get();
 }
+
+// ── Balance SQL constants ─────────────────────────────────────────────────────
+//
+// UNION ALL decomposes each transaction into signed (wid, delta) contributions,
+// then groups by wallet so transfers are counted on both sides.
+
+/// All wallets: returns one row per wallet with columns (id TEXT, balance INTEGER).
+const _kAllBalancesSql = '''
+  SELECT w.id AS id,
+    w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
+  FROM wallets w
+  LEFT JOIN (
+    SELECT wid, SUM(delta) AS delta_sum FROM (
+      SELECT wallet_id    AS wid,  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1
+      UNION ALL
+      SELECT wallet_id    AS wid, -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1
+      UNION ALL
+      SELECT wallet_id    AS wid, -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1
+      UNION ALL
+      SELECT wallet_to_id AS wid,  amount AS delta FROM txns
+        WHERE type='transfer' AND affects_balance=1 AND wallet_to_id IS NOT NULL
+    ) GROUP BY wid
+  ) c ON c.wid = w.id
+''';
+
+/// Single wallet (no excludeId). 5 positional params, all = walletId.
+const _kSingleBalanceSql = '''
+  SELECT w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
+  FROM wallets w
+  LEFT JOIN (
+    SELECT SUM(delta) AS delta_sum FROM (
+      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=?
+      UNION ALL
+      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=?
+      UNION ALL
+      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=?
+      UNION ALL
+      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=?
+    )
+  ) c
+  WHERE w.id=?
+''';
+
+/// Single wallet excluding one id. 9 params: (walletId, excludeId) × 4 + walletId.
+const _kSingleBalanceExcludeSql = '''
+  SELECT w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
+  FROM wallets w
+  LEFT JOIN (
+    SELECT SUM(delta) AS delta_sum FROM (
+      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=? AND id!=?
+      UNION ALL
+      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=? AND id!=?
+      UNION ALL
+      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=? AND id!=?
+      UNION ALL
+      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=? AND id!=?
+    )
+  ) c
+  WHERE w.id=?
+''';
 
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {

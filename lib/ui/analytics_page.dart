@@ -53,52 +53,16 @@ class _Stats {
   int get prevNet => prevEarning - prevSpending;
   int get yearNet => yearEarning - yearSpending;
 
-  static _Stats fromTxns(List<Txn> txns, DateTime month) {
-    final prev = DateTime(month.year, month.month - 1);
-    int sp = 0, ea = 0, psp = 0, pea = 0, ysp = 0, yea = 0;
-    final scat = <String, int>{};
-    final ecat = <String, int>{};
-
-    for (final t in txns) {
-      if (!t.affectsBalance) continue;
-      if (t.type == TxTypes.transfer) continue;
-
-      final inCurr =
-          t.timestamp.year == month.year && t.timestamp.month == month.month;
-      final inPrev =
-          t.timestamp.year == prev.year && t.timestamp.month == prev.month;
-      final inYear = t.timestamp.year == month.year;
-
-      if (t.type == TxTypes.spending) {
-        if (inCurr) {
-          sp += t.amount;
-          final cat = t.category ?? 'others';
-          scat[cat] = (scat[cat] ?? 0) + t.amount;
-        }
-        if (inPrev) psp += t.amount;
-        if (inYear) ysp += t.amount;
-      } else if (t.type == TxTypes.earning) {
-        if (inCurr) {
-          ea += t.amount;
-          final cat = t.category ?? 'others_earn';
-          ecat[cat] = (ecat[cat] ?? 0) + t.amount;
-        }
-        if (inPrev) pea += t.amount;
-        if (inYear) yea += t.amount;
-      }
-    }
-
-    return _Stats(
-      spending: sp,
-      earning: ea,
-      prevSpending: psp,
-      prevEarning: pea,
-      spendByCat: scat,
-      earnByCat: ecat,
-      yearSpending: ysp,
-      yearEarning: yea,
-    );
-  }
+  factory _Stats.fromBundle(AnalyticsBundle b) => _Stats(
+        spending: b.currSpending,
+        earning: b.currEarning,
+        prevSpending: b.prevSpending,
+        prevEarning: b.prevEarning,
+        spendByCat: b.spendByCat,
+        earnByCat: b.earnByCat,
+        yearSpending: b.yearSpending,
+        yearEarning: b.yearEarning,
+      );
 }
 
 // ---------------------------------------------------------------------------
@@ -113,19 +77,32 @@ class AnalyticsPage extends ConsumerStatefulWidget {
 
 class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
   late DateTime _month;
+  late Stream<AnalyticsBundle> _bundleStream;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _month = DateTime(now.year, now.month);
+    _bundleStream =
+        ref.read(repositoryProvider).watchAnalyticsBundle(_month);
   }
 
-  void _prevMonth() =>
-      setState(() => _month = DateTime(_month.year, _month.month - 1));
+  void _prevMonth() => setState(() {
+        _month = DateTime(_month.year, _month.month - 1);
+        _bundleStream =
+            ref.read(repositoryProvider).watchAnalyticsBundle(_month);
+      });
+
   void _nextMonth() {
     final next = DateTime(_month.year, _month.month + 1);
-    if (!next.isAfter(DateTime.now())) setState(() => _month = next);
+    if (!next.isAfter(DateTime.now())) {
+      setState(() {
+        _month = next;
+        _bundleStream =
+            ref.read(repositoryProvider).watchAnalyticsBundle(next);
+      });
+    }
   }
 
   @override
@@ -137,11 +114,14 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
         final catLabels = {
           for (final c in catSnap.data ?? const <AppCategory>[]) c.id: c.label
         };
-        return StreamBuilder<List<Txn>>(
-          stream: repo.watchTxns(),
+        return StreamBuilder<AnalyticsBundle>(
+          stream: _bundleStream,
           builder: (context, snap) {
-            final txns = snap.data ?? const [];
-            final s = _Stats.fromTxns(txns, _month);
+            final bundle = snap.data;
+            if (bundle == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final s = _Stats.fromBundle(bundle);
 
             return ListView(
               padding: const EdgeInsets.all(12),
