@@ -22,8 +22,8 @@ get:
 	$(FLUTTER) pub get
 
 gen: get
-	dart run pigeon --input pigeons/capture_channel.dart
-	dart run build_runner build --delete-conflicting-outputs
+	$(FLUTTER) pub run pigeon --input pigeons/capture_channel.dart
+	$(FLUTTER) pub run build_runner build --delete-conflicting-outputs
 
 apk: gen
 	python patch_android.py

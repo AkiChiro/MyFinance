@@ -18,11 +18,11 @@ abstract class BankNotificationParser {
 ///       Cross-check: Play Store → App → id= query parameter.
 class BankPackages {
   // TODO: verify against a real capture / Play Store id=com.ocb.app
-  static const ocb = 'com.ocb.app';
+  static const ocb = 'vn.com.ocb.awe';
   // TODO: verify against a real capture / Play Store id=com.mbmobile
   static const mb = 'com.mbmobile';
   // TODO: verify against a real capture / Play Store id=com.techcombank.mb
-  static const techcombank = 'com.techcombank.mb';
+  static const techcombank = 'vn.com.techcombank.bb.app';
 
   /// All known bank package names — used by [CaptureService] to build the
   /// watched-packages set on every drain.
