@@ -33,8 +33,15 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
       type: DriftSqlType.string,
       requiredDuringInsert: false,
       defaultValue: const Constant('cash'));
+  static const VerificationMeta _packageNameMeta =
+      const VerificationMeta('packageName');
   @override
-  List<GeneratedColumn> get $columns => [id, name, initialBalance, type];
+  late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
+      'package_name', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, name, initialBalance, type, packageName];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -66,6 +73,12 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
       context.handle(
           _typeMeta, type.isAcceptableOrUnknown(data['type']!, _typeMeta));
     }
+    if (data.containsKey('package_name')) {
+      context.handle(
+          _packageNameMeta,
+          packageName.isAcceptableOrUnknown(
+              data['package_name']!, _packageNameMeta));
+    }
     return context;
   }
 
@@ -83,6 +96,8 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
           .read(DriftSqlType.int, data['${effectivePrefix}initial_balance'])!,
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
+      packageName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}package_name']),
     );
   }
 
@@ -97,11 +112,13 @@ class Wallet extends DataClass implements Insertable<Wallet> {
   final String name;
   final int initialBalance;
   final String type;
+  final String? packageName;
   const Wallet(
       {required this.id,
       required this.name,
       required this.initialBalance,
-      required this.type});
+      required this.type,
+      this.packageName});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -109,6 +126,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
     map['name'] = Variable<String>(name);
     map['initial_balance'] = Variable<int>(initialBalance);
     map['type'] = Variable<String>(type);
+    if (!nullToAbsent || packageName != null) {
+      map['package_name'] = Variable<String>(packageName);
+    }
     return map;
   }
 
@@ -118,6 +138,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       name: Value(name),
       initialBalance: Value(initialBalance),
       type: Value(type),
+      packageName: packageName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(packageName),
     );
   }
 
@@ -129,6 +152,7 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       name: serializer.fromJson<String>(json['name']),
       initialBalance: serializer.fromJson<int>(json['initialBalance']),
       type: serializer.fromJson<String>(json['type']),
+      packageName: serializer.fromJson<String?>(json['packageName']),
     );
   }
   @override
@@ -139,16 +163,22 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       'name': serializer.toJson<String>(name),
       'initialBalance': serializer.toJson<int>(initialBalance),
       'type': serializer.toJson<String>(type),
+      'packageName': serializer.toJson<String?>(packageName),
     };
   }
 
   Wallet copyWith(
-          {String? id, String? name, int? initialBalance, String? type}) =>
+          {String? id,
+          String? name,
+          int? initialBalance,
+          String? type,
+          Value<String?> packageName = const Value.absent()}) =>
       Wallet(
         id: id ?? this.id,
         name: name ?? this.name,
         initialBalance: initialBalance ?? this.initialBalance,
         type: type ?? this.type,
+        packageName: packageName.present ? packageName.value : this.packageName,
       );
   Wallet copyWithCompanion(WalletsCompanion data) {
     return Wallet(
@@ -158,6 +188,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           ? data.initialBalance.value
           : this.initialBalance,
       type: data.type.present ? data.type.value : this.type,
+      packageName:
+          data.packageName.present ? data.packageName.value : this.packageName,
     );
   }
 
@@ -167,13 +199,14 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('initialBalance: $initialBalance, ')
-          ..write('type: $type')
+          ..write('type: $type, ')
+          ..write('packageName: $packageName')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, initialBalance, type);
+  int get hashCode => Object.hash(id, name, initialBalance, type, packageName);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -181,7 +214,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           other.id == this.id &&
           other.name == this.name &&
           other.initialBalance == this.initialBalance &&
-          other.type == this.type);
+          other.type == this.type &&
+          other.packageName == this.packageName);
 }
 
 class WalletsCompanion extends UpdateCompanion<Wallet> {
@@ -189,12 +223,14 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
   final Value<String> name;
   final Value<int> initialBalance;
   final Value<String> type;
+  final Value<String?> packageName;
   final Value<int> rowid;
   const WalletsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.initialBalance = const Value.absent(),
     this.type = const Value.absent(),
+    this.packageName = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WalletsCompanion.insert({
@@ -202,6 +238,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     required String name,
     this.initialBalance = const Value.absent(),
     this.type = const Value.absent(),
+    this.packageName = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         name = Value(name);
@@ -210,6 +247,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     Expression<String>? name,
     Expression<int>? initialBalance,
     Expression<String>? type,
+    Expression<String>? packageName,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -217,6 +255,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       if (name != null) 'name': name,
       if (initialBalance != null) 'initial_balance': initialBalance,
       if (type != null) 'type': type,
+      if (packageName != null) 'package_name': packageName,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -226,12 +265,14 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       Value<String>? name,
       Value<int>? initialBalance,
       Value<String>? type,
+      Value<String?>? packageName,
       Value<int>? rowid}) {
     return WalletsCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
       initialBalance: initialBalance ?? this.initialBalance,
       type: type ?? this.type,
+      packageName: packageName ?? this.packageName,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -251,6 +292,9 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     if (type.present) {
       map['type'] = Variable<String>(type.value);
     }
+    if (packageName.present) {
+      map['package_name'] = Variable<String>(packageName.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -264,6 +308,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
           ..write('name: $name, ')
           ..write('initialBalance: $initialBalance, ')
           ..write('type: $type, ')
+          ..write('packageName: $packageName, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -359,6 +404,23 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
       'wallet_to_name', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   @override
+  late final GeneratedColumnWithTypeConverter<SourceType, String> source =
+      GeneratedColumn<String>('source', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('manual'))
+          .withConverter<SourceType>($TxnsTable.$convertersource);
+  static const VerificationMeta _affectsBalanceMeta =
+      const VerificationMeta('affectsBalance');
+  @override
+  late final GeneratedColumn<bool> affectsBalance = GeneratedColumn<bool>(
+      'affects_balance', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("affects_balance" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  @override
   List<GeneratedColumn> get $columns => [
         id,
         type,
@@ -372,7 +434,9 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
         imported,
         starred,
         walletFromName,
-        walletToName
+        walletToName,
+        source,
+        affectsBalance
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -455,6 +519,12 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
           walletToName.isAcceptableOrUnknown(
               data['wallet_to_name']!, _walletToNameMeta));
     }
+    if (data.containsKey('affects_balance')) {
+      context.handle(
+          _affectsBalanceMeta,
+          affectsBalance.isAcceptableOrUnknown(
+              data['affects_balance']!, _affectsBalanceMeta));
+    }
     return context;
   }
 
@@ -490,6 +560,10 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
           DriftSqlType.string, data['${effectivePrefix}wallet_from_name']),
       walletToName: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}wallet_to_name']),
+      source: $TxnsTable.$convertersource.fromSql(attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}source'])!),
+      affectsBalance: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}affects_balance'])!,
     );
   }
 
@@ -497,6 +571,9 @@ class $TxnsTable extends Txns with TableInfo<$TxnsTable, Txn> {
   $TxnsTable createAlias(String alias) {
     return $TxnsTable(attachedDatabase, alias);
   }
+
+  static JsonTypeConverter2<SourceType, String, String> $convertersource =
+      const EnumNameConverter<SourceType>(SourceType.values);
 }
 
 class Txn extends DataClass implements Insertable<Txn> {
@@ -517,6 +594,8 @@ class Txn extends DataClass implements Insertable<Txn> {
 
   /// Snapshot of the destination wallet name at CSV-import time.
   final String? walletToName;
+  final SourceType source;
+  final bool affectsBalance;
   const Txn(
       {required this.id,
       required this.type,
@@ -530,7 +609,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       required this.imported,
       required this.starred,
       this.walletFromName,
-      this.walletToName});
+      this.walletToName,
+      required this.source,
+      required this.affectsBalance});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -557,6 +638,11 @@ class Txn extends DataClass implements Insertable<Txn> {
     if (!nullToAbsent || walletToName != null) {
       map['wallet_to_name'] = Variable<String>(walletToName);
     }
+    {
+      map['source'] =
+          Variable<String>($TxnsTable.$convertersource.toSql(source));
+    }
+    map['affects_balance'] = Variable<bool>(affectsBalance);
     return map;
   }
 
@@ -585,6 +671,8 @@ class Txn extends DataClass implements Insertable<Txn> {
       walletToName: walletToName == null && nullToAbsent
           ? const Value.absent()
           : Value(walletToName),
+      source: Value(source),
+      affectsBalance: Value(affectsBalance),
     );
   }
 
@@ -605,6 +693,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       starred: serializer.fromJson<bool>(json['starred']),
       walletFromName: serializer.fromJson<String?>(json['walletFromName']),
       walletToName: serializer.fromJson<String?>(json['walletToName']),
+      source: $TxnsTable.$convertersource
+          .fromJson(serializer.fromJson<String>(json['source'])),
+      affectsBalance: serializer.fromJson<bool>(json['affectsBalance']),
     );
   }
   @override
@@ -624,6 +715,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       'starred': serializer.toJson<bool>(starred),
       'walletFromName': serializer.toJson<String?>(walletFromName),
       'walletToName': serializer.toJson<String?>(walletToName),
+      'source':
+          serializer.toJson<String>($TxnsTable.$convertersource.toJson(source)),
+      'affectsBalance': serializer.toJson<bool>(affectsBalance),
     };
   }
 
@@ -640,7 +734,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           bool? imported,
           bool? starred,
           Value<String?> walletFromName = const Value.absent(),
-          Value<String?> walletToName = const Value.absent()}) =>
+          Value<String?> walletToName = const Value.absent(),
+          SourceType? source,
+          bool? affectsBalance}) =>
       Txn(
         id: id ?? this.id,
         type: type ?? this.type,
@@ -657,6 +753,8 @@ class Txn extends DataClass implements Insertable<Txn> {
             walletFromName.present ? walletFromName.value : this.walletFromName,
         walletToName:
             walletToName.present ? walletToName.value : this.walletToName,
+        source: source ?? this.source,
+        affectsBalance: affectsBalance ?? this.affectsBalance,
       );
   Txn copyWithCompanion(TxnsCompanion data) {
     return Txn(
@@ -679,6 +777,10 @@ class Txn extends DataClass implements Insertable<Txn> {
       walletToName: data.walletToName.present
           ? data.walletToName.value
           : this.walletToName,
+      source: data.source.present ? data.source.value : this.source,
+      affectsBalance: data.affectsBalance.present
+          ? data.affectsBalance.value
+          : this.affectsBalance,
     );
   }
 
@@ -697,7 +799,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           ..write('imported: $imported, ')
           ..write('starred: $starred, ')
           ..write('walletFromName: $walletFromName, ')
-          ..write('walletToName: $walletToName')
+          ..write('walletToName: $walletToName, ')
+          ..write('source: $source, ')
+          ..write('affectsBalance: $affectsBalance')
           ..write(')'))
         .toString();
   }
@@ -716,7 +820,9 @@ class Txn extends DataClass implements Insertable<Txn> {
       imported,
       starred,
       walletFromName,
-      walletToName);
+      walletToName,
+      source,
+      affectsBalance);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -733,7 +839,9 @@ class Txn extends DataClass implements Insertable<Txn> {
           other.imported == this.imported &&
           other.starred == this.starred &&
           other.walletFromName == this.walletFromName &&
-          other.walletToName == this.walletToName);
+          other.walletToName == this.walletToName &&
+          other.source == this.source &&
+          other.affectsBalance == this.affectsBalance);
 }
 
 class TxnsCompanion extends UpdateCompanion<Txn> {
@@ -750,6 +858,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
   final Value<bool> starred;
   final Value<String?> walletFromName;
   final Value<String?> walletToName;
+  final Value<SourceType> source;
+  final Value<bool> affectsBalance;
   final Value<int> rowid;
   const TxnsCompanion({
     this.id = const Value.absent(),
@@ -765,6 +875,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     this.starred = const Value.absent(),
     this.walletFromName = const Value.absent(),
     this.walletToName = const Value.absent(),
+    this.source = const Value.absent(),
+    this.affectsBalance = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TxnsCompanion.insert({
@@ -781,6 +893,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     this.starred = const Value.absent(),
     this.walletFromName = const Value.absent(),
     this.walletToName = const Value.absent(),
+    this.source = const Value.absent(),
+    this.affectsBalance = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         type = Value(type),
@@ -802,6 +916,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     Expression<bool>? starred,
     Expression<String>? walletFromName,
     Expression<String>? walletToName,
+    Expression<String>? source,
+    Expression<bool>? affectsBalance,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -818,6 +934,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       if (starred != null) 'starred': starred,
       if (walletFromName != null) 'wallet_from_name': walletFromName,
       if (walletToName != null) 'wallet_to_name': walletToName,
+      if (source != null) 'source': source,
+      if (affectsBalance != null) 'affects_balance': affectsBalance,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -836,6 +954,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       Value<bool>? starred,
       Value<String?>? walletFromName,
       Value<String?>? walletToName,
+      Value<SourceType>? source,
+      Value<bool>? affectsBalance,
       Value<int>? rowid}) {
     return TxnsCompanion(
       id: id ?? this.id,
@@ -851,6 +971,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
       starred: starred ?? this.starred,
       walletFromName: walletFromName ?? this.walletFromName,
       walletToName: walletToName ?? this.walletToName,
+      source: source ?? this.source,
+      affectsBalance: affectsBalance ?? this.affectsBalance,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -897,6 +1019,13 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
     if (walletToName.present) {
       map['wallet_to_name'] = Variable<String>(walletToName.value);
     }
+    if (source.present) {
+      map['source'] =
+          Variable<String>($TxnsTable.$convertersource.toSql(source.value));
+    }
+    if (affectsBalance.present) {
+      map['affects_balance'] = Variable<bool>(affectsBalance.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -919,6 +1048,8 @@ class TxnsCompanion extends UpdateCompanion<Txn> {
           ..write('starred: $starred, ')
           ..write('walletFromName: $walletFromName, ')
           ..write('walletToName: $walletToName, ')
+          ..write('source: $source, ')
+          ..write('affectsBalance: $affectsBalance, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1307,18 +1438,701 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
   }
 }
 
+class $NotificationCapturesTable extends NotificationCaptures
+    with TableInfo<$NotificationCapturesTable, NotificationCapture> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NotificationCapturesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _packageNameMeta =
+      const VerificationMeta('packageName');
+  @override
+  late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
+      'package_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _rawTitleMeta =
+      const VerificationMeta('rawTitle');
+  @override
+  late final GeneratedColumn<String> rawTitle = GeneratedColumn<String>(
+      'raw_title', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _rawTextMeta =
+      const VerificationMeta('rawText');
+  @override
+  late final GeneratedColumn<String> rawText = GeneratedColumn<String>(
+      'raw_text', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _capturedAtMeta =
+      const VerificationMeta('capturedAt');
+  @override
+  late final GeneratedColumn<DateTime> capturedAt = GeneratedColumn<DateTime>(
+      'captured_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _amountMeta = const VerificationMeta('amount');
+  @override
+  late final GeneratedColumn<int> amount = GeneratedColumn<int>(
+      'amount', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  @override
+  late final GeneratedColumnWithTypeConverter<CaptureDirection?, String>
+      direction = GeneratedColumn<String>('direction', aliasedName, true,
+              type: DriftSqlType.string, requiredDuringInsert: false)
+          .withConverter<CaptureDirection?>(
+              $NotificationCapturesTable.$converterdirectionn);
+  @override
+  late final GeneratedColumnWithTypeConverter<ParseStatus, String> parseStatus =
+      GeneratedColumn<String>('parse_status', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('unparsed'))
+          .withConverter<ParseStatus>(
+              $NotificationCapturesTable.$converterparseStatus);
+  static const VerificationMeta _suggestedWalletIdMeta =
+      const VerificationMeta('suggestedWalletId');
+  @override
+  late final GeneratedColumn<String> suggestedWalletId =
+      GeneratedColumn<String>('suggested_wallet_id', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _suggestedCategoryMeta =
+      const VerificationMeta('suggestedCategory');
+  @override
+  late final GeneratedColumn<String> suggestedCategory =
+      GeneratedColumn<String>('suggested_category', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  late final GeneratedColumnWithTypeConverter<CaptureStatus, String> status =
+      GeneratedColumn<String>('status', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('pending'))
+          .withConverter<CaptureStatus>(
+              $NotificationCapturesTable.$converterstatus);
+  static const VerificationMeta _resultingTxnIdMeta =
+      const VerificationMeta('resultingTxnId');
+  @override
+  late final GeneratedColumn<String> resultingTxnId = GeneratedColumn<String>(
+      'resulting_txn_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _dedupKeyMeta =
+      const VerificationMeta('dedupKey');
+  @override
+  late final GeneratedColumn<String> dedupKey = GeneratedColumn<String>(
+      'dedup_key', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        packageName,
+        rawTitle,
+        rawText,
+        capturedAt,
+        amount,
+        direction,
+        parseStatus,
+        suggestedWalletId,
+        suggestedCategory,
+        status,
+        resultingTxnId,
+        dedupKey
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'notification_captures';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<NotificationCapture> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('package_name')) {
+      context.handle(
+          _packageNameMeta,
+          packageName.isAcceptableOrUnknown(
+              data['package_name']!, _packageNameMeta));
+    } else if (isInserting) {
+      context.missing(_packageNameMeta);
+    }
+    if (data.containsKey('raw_title')) {
+      context.handle(_rawTitleMeta,
+          rawTitle.isAcceptableOrUnknown(data['raw_title']!, _rawTitleMeta));
+    }
+    if (data.containsKey('raw_text')) {
+      context.handle(_rawTextMeta,
+          rawText.isAcceptableOrUnknown(data['raw_text']!, _rawTextMeta));
+    } else if (isInserting) {
+      context.missing(_rawTextMeta);
+    }
+    if (data.containsKey('captured_at')) {
+      context.handle(
+          _capturedAtMeta,
+          capturedAt.isAcceptableOrUnknown(
+              data['captured_at']!, _capturedAtMeta));
+    } else if (isInserting) {
+      context.missing(_capturedAtMeta);
+    }
+    if (data.containsKey('amount')) {
+      context.handle(_amountMeta,
+          amount.isAcceptableOrUnknown(data['amount']!, _amountMeta));
+    }
+    if (data.containsKey('suggested_wallet_id')) {
+      context.handle(
+          _suggestedWalletIdMeta,
+          suggestedWalletId.isAcceptableOrUnknown(
+              data['suggested_wallet_id']!, _suggestedWalletIdMeta));
+    }
+    if (data.containsKey('suggested_category')) {
+      context.handle(
+          _suggestedCategoryMeta,
+          suggestedCategory.isAcceptableOrUnknown(
+              data['suggested_category']!, _suggestedCategoryMeta));
+    }
+    if (data.containsKey('resulting_txn_id')) {
+      context.handle(
+          _resultingTxnIdMeta,
+          resultingTxnId.isAcceptableOrUnknown(
+              data['resulting_txn_id']!, _resultingTxnIdMeta));
+    }
+    if (data.containsKey('dedup_key')) {
+      context.handle(_dedupKeyMeta,
+          dedupKey.isAcceptableOrUnknown(data['dedup_key']!, _dedupKeyMeta));
+    } else if (isInserting) {
+      context.missing(_dedupKeyMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  NotificationCapture map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return NotificationCapture(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      packageName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}package_name'])!,
+      rawTitle: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}raw_title']),
+      rawText: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}raw_text'])!,
+      capturedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}captured_at'])!,
+      amount: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}amount']),
+      direction: $NotificationCapturesTable.$converterdirectionn.fromSql(
+          attachedDatabase.typeMapping
+              .read(DriftSqlType.string, data['${effectivePrefix}direction'])),
+      parseStatus: $NotificationCapturesTable.$converterparseStatus.fromSql(
+          attachedDatabase.typeMapping.read(
+              DriftSqlType.string, data['${effectivePrefix}parse_status'])!),
+      suggestedWalletId: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}suggested_wallet_id']),
+      suggestedCategory: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}suggested_category']),
+      status: $NotificationCapturesTable.$converterstatus.fromSql(
+          attachedDatabase.typeMapping
+              .read(DriftSqlType.string, data['${effectivePrefix}status'])!),
+      resultingTxnId: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}resulting_txn_id']),
+      dedupKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}dedup_key'])!,
+    );
+  }
+
+  @override
+  $NotificationCapturesTable createAlias(String alias) {
+    return $NotificationCapturesTable(attachedDatabase, alias);
+  }
+
+  static JsonTypeConverter2<CaptureDirection, String, String>
+      $converterdirection =
+      const EnumNameConverter<CaptureDirection>(CaptureDirection.values);
+  static JsonTypeConverter2<CaptureDirection?, String?, String?>
+      $converterdirectionn = JsonTypeConverter2.asNullable($converterdirection);
+  static JsonTypeConverter2<ParseStatus, String, String> $converterparseStatus =
+      const EnumNameConverter<ParseStatus>(ParseStatus.values);
+  static JsonTypeConverter2<CaptureStatus, String, String> $converterstatus =
+      const EnumNameConverter<CaptureStatus>(CaptureStatus.values);
+}
+
+class NotificationCapture extends DataClass
+    implements Insertable<NotificationCapture> {
+  final String id;
+  final String packageName;
+  final String? rawTitle;
+  final String rawText;
+  final DateTime capturedAt;
+  final int? amount;
+  final CaptureDirection? direction;
+  final ParseStatus parseStatus;
+  final String? suggestedWalletId;
+  final String? suggestedCategory;
+  final CaptureStatus status;
+  final String? resultingTxnId;
+  final String dedupKey;
+  const NotificationCapture(
+      {required this.id,
+      required this.packageName,
+      this.rawTitle,
+      required this.rawText,
+      required this.capturedAt,
+      this.amount,
+      this.direction,
+      required this.parseStatus,
+      this.suggestedWalletId,
+      this.suggestedCategory,
+      required this.status,
+      this.resultingTxnId,
+      required this.dedupKey});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['package_name'] = Variable<String>(packageName);
+    if (!nullToAbsent || rawTitle != null) {
+      map['raw_title'] = Variable<String>(rawTitle);
+    }
+    map['raw_text'] = Variable<String>(rawText);
+    map['captured_at'] = Variable<DateTime>(capturedAt);
+    if (!nullToAbsent || amount != null) {
+      map['amount'] = Variable<int>(amount);
+    }
+    if (!nullToAbsent || direction != null) {
+      map['direction'] = Variable<String>(
+          $NotificationCapturesTable.$converterdirectionn.toSql(direction));
+    }
+    {
+      map['parse_status'] = Variable<String>(
+          $NotificationCapturesTable.$converterparseStatus.toSql(parseStatus));
+    }
+    if (!nullToAbsent || suggestedWalletId != null) {
+      map['suggested_wallet_id'] = Variable<String>(suggestedWalletId);
+    }
+    if (!nullToAbsent || suggestedCategory != null) {
+      map['suggested_category'] = Variable<String>(suggestedCategory);
+    }
+    {
+      map['status'] = Variable<String>(
+          $NotificationCapturesTable.$converterstatus.toSql(status));
+    }
+    if (!nullToAbsent || resultingTxnId != null) {
+      map['resulting_txn_id'] = Variable<String>(resultingTxnId);
+    }
+    map['dedup_key'] = Variable<String>(dedupKey);
+    return map;
+  }
+
+  NotificationCapturesCompanion toCompanion(bool nullToAbsent) {
+    return NotificationCapturesCompanion(
+      id: Value(id),
+      packageName: Value(packageName),
+      rawTitle: rawTitle == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rawTitle),
+      rawText: Value(rawText),
+      capturedAt: Value(capturedAt),
+      amount:
+          amount == null && nullToAbsent ? const Value.absent() : Value(amount),
+      direction: direction == null && nullToAbsent
+          ? const Value.absent()
+          : Value(direction),
+      parseStatus: Value(parseStatus),
+      suggestedWalletId: suggestedWalletId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(suggestedWalletId),
+      suggestedCategory: suggestedCategory == null && nullToAbsent
+          ? const Value.absent()
+          : Value(suggestedCategory),
+      status: Value(status),
+      resultingTxnId: resultingTxnId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(resultingTxnId),
+      dedupKey: Value(dedupKey),
+    );
+  }
+
+  factory NotificationCapture.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return NotificationCapture(
+      id: serializer.fromJson<String>(json['id']),
+      packageName: serializer.fromJson<String>(json['packageName']),
+      rawTitle: serializer.fromJson<String?>(json['rawTitle']),
+      rawText: serializer.fromJson<String>(json['rawText']),
+      capturedAt: serializer.fromJson<DateTime>(json['capturedAt']),
+      amount: serializer.fromJson<int?>(json['amount']),
+      direction: $NotificationCapturesTable.$converterdirectionn
+          .fromJson(serializer.fromJson<String?>(json['direction'])),
+      parseStatus: $NotificationCapturesTable.$converterparseStatus
+          .fromJson(serializer.fromJson<String>(json['parseStatus'])),
+      suggestedWalletId:
+          serializer.fromJson<String?>(json['suggestedWalletId']),
+      suggestedCategory:
+          serializer.fromJson<String?>(json['suggestedCategory']),
+      status: $NotificationCapturesTable.$converterstatus
+          .fromJson(serializer.fromJson<String>(json['status'])),
+      resultingTxnId: serializer.fromJson<String?>(json['resultingTxnId']),
+      dedupKey: serializer.fromJson<String>(json['dedupKey']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'packageName': serializer.toJson<String>(packageName),
+      'rawTitle': serializer.toJson<String?>(rawTitle),
+      'rawText': serializer.toJson<String>(rawText),
+      'capturedAt': serializer.toJson<DateTime>(capturedAt),
+      'amount': serializer.toJson<int?>(amount),
+      'direction': serializer.toJson<String?>(
+          $NotificationCapturesTable.$converterdirectionn.toJson(direction)),
+      'parseStatus': serializer.toJson<String>(
+          $NotificationCapturesTable.$converterparseStatus.toJson(parseStatus)),
+      'suggestedWalletId': serializer.toJson<String?>(suggestedWalletId),
+      'suggestedCategory': serializer.toJson<String?>(suggestedCategory),
+      'status': serializer.toJson<String>(
+          $NotificationCapturesTable.$converterstatus.toJson(status)),
+      'resultingTxnId': serializer.toJson<String?>(resultingTxnId),
+      'dedupKey': serializer.toJson<String>(dedupKey),
+    };
+  }
+
+  NotificationCapture copyWith(
+          {String? id,
+          String? packageName,
+          Value<String?> rawTitle = const Value.absent(),
+          String? rawText,
+          DateTime? capturedAt,
+          Value<int?> amount = const Value.absent(),
+          Value<CaptureDirection?> direction = const Value.absent(),
+          ParseStatus? parseStatus,
+          Value<String?> suggestedWalletId = const Value.absent(),
+          Value<String?> suggestedCategory = const Value.absent(),
+          CaptureStatus? status,
+          Value<String?> resultingTxnId = const Value.absent(),
+          String? dedupKey}) =>
+      NotificationCapture(
+        id: id ?? this.id,
+        packageName: packageName ?? this.packageName,
+        rawTitle: rawTitle.present ? rawTitle.value : this.rawTitle,
+        rawText: rawText ?? this.rawText,
+        capturedAt: capturedAt ?? this.capturedAt,
+        amount: amount.present ? amount.value : this.amount,
+        direction: direction.present ? direction.value : this.direction,
+        parseStatus: parseStatus ?? this.parseStatus,
+        suggestedWalletId: suggestedWalletId.present
+            ? suggestedWalletId.value
+            : this.suggestedWalletId,
+        suggestedCategory: suggestedCategory.present
+            ? suggestedCategory.value
+            : this.suggestedCategory,
+        status: status ?? this.status,
+        resultingTxnId:
+            resultingTxnId.present ? resultingTxnId.value : this.resultingTxnId,
+        dedupKey: dedupKey ?? this.dedupKey,
+      );
+  NotificationCapture copyWithCompanion(NotificationCapturesCompanion data) {
+    return NotificationCapture(
+      id: data.id.present ? data.id.value : this.id,
+      packageName:
+          data.packageName.present ? data.packageName.value : this.packageName,
+      rawTitle: data.rawTitle.present ? data.rawTitle.value : this.rawTitle,
+      rawText: data.rawText.present ? data.rawText.value : this.rawText,
+      capturedAt:
+          data.capturedAt.present ? data.capturedAt.value : this.capturedAt,
+      amount: data.amount.present ? data.amount.value : this.amount,
+      direction: data.direction.present ? data.direction.value : this.direction,
+      parseStatus:
+          data.parseStatus.present ? data.parseStatus.value : this.parseStatus,
+      suggestedWalletId: data.suggestedWalletId.present
+          ? data.suggestedWalletId.value
+          : this.suggestedWalletId,
+      suggestedCategory: data.suggestedCategory.present
+          ? data.suggestedCategory.value
+          : this.suggestedCategory,
+      status: data.status.present ? data.status.value : this.status,
+      resultingTxnId: data.resultingTxnId.present
+          ? data.resultingTxnId.value
+          : this.resultingTxnId,
+      dedupKey: data.dedupKey.present ? data.dedupKey.value : this.dedupKey,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NotificationCapture(')
+          ..write('id: $id, ')
+          ..write('packageName: $packageName, ')
+          ..write('rawTitle: $rawTitle, ')
+          ..write('rawText: $rawText, ')
+          ..write('capturedAt: $capturedAt, ')
+          ..write('amount: $amount, ')
+          ..write('direction: $direction, ')
+          ..write('parseStatus: $parseStatus, ')
+          ..write('suggestedWalletId: $suggestedWalletId, ')
+          ..write('suggestedCategory: $suggestedCategory, ')
+          ..write('status: $status, ')
+          ..write('resultingTxnId: $resultingTxnId, ')
+          ..write('dedupKey: $dedupKey')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      id,
+      packageName,
+      rawTitle,
+      rawText,
+      capturedAt,
+      amount,
+      direction,
+      parseStatus,
+      suggestedWalletId,
+      suggestedCategory,
+      status,
+      resultingTxnId,
+      dedupKey);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is NotificationCapture &&
+          other.id == this.id &&
+          other.packageName == this.packageName &&
+          other.rawTitle == this.rawTitle &&
+          other.rawText == this.rawText &&
+          other.capturedAt == this.capturedAt &&
+          other.amount == this.amount &&
+          other.direction == this.direction &&
+          other.parseStatus == this.parseStatus &&
+          other.suggestedWalletId == this.suggestedWalletId &&
+          other.suggestedCategory == this.suggestedCategory &&
+          other.status == this.status &&
+          other.resultingTxnId == this.resultingTxnId &&
+          other.dedupKey == this.dedupKey);
+}
+
+class NotificationCapturesCompanion
+    extends UpdateCompanion<NotificationCapture> {
+  final Value<String> id;
+  final Value<String> packageName;
+  final Value<String?> rawTitle;
+  final Value<String> rawText;
+  final Value<DateTime> capturedAt;
+  final Value<int?> amount;
+  final Value<CaptureDirection?> direction;
+  final Value<ParseStatus> parseStatus;
+  final Value<String?> suggestedWalletId;
+  final Value<String?> suggestedCategory;
+  final Value<CaptureStatus> status;
+  final Value<String?> resultingTxnId;
+  final Value<String> dedupKey;
+  final Value<int> rowid;
+  const NotificationCapturesCompanion({
+    this.id = const Value.absent(),
+    this.packageName = const Value.absent(),
+    this.rawTitle = const Value.absent(),
+    this.rawText = const Value.absent(),
+    this.capturedAt = const Value.absent(),
+    this.amount = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.parseStatus = const Value.absent(),
+    this.suggestedWalletId = const Value.absent(),
+    this.suggestedCategory = const Value.absent(),
+    this.status = const Value.absent(),
+    this.resultingTxnId = const Value.absent(),
+    this.dedupKey = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NotificationCapturesCompanion.insert({
+    required String id,
+    required String packageName,
+    this.rawTitle = const Value.absent(),
+    required String rawText,
+    required DateTime capturedAt,
+    this.amount = const Value.absent(),
+    this.direction = const Value.absent(),
+    this.parseStatus = const Value.absent(),
+    this.suggestedWalletId = const Value.absent(),
+    this.suggestedCategory = const Value.absent(),
+    this.status = const Value.absent(),
+    this.resultingTxnId = const Value.absent(),
+    required String dedupKey,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        packageName = Value(packageName),
+        rawText = Value(rawText),
+        capturedAt = Value(capturedAt),
+        dedupKey = Value(dedupKey);
+  static Insertable<NotificationCapture> custom({
+    Expression<String>? id,
+    Expression<String>? packageName,
+    Expression<String>? rawTitle,
+    Expression<String>? rawText,
+    Expression<DateTime>? capturedAt,
+    Expression<int>? amount,
+    Expression<String>? direction,
+    Expression<String>? parseStatus,
+    Expression<String>? suggestedWalletId,
+    Expression<String>? suggestedCategory,
+    Expression<String>? status,
+    Expression<String>? resultingTxnId,
+    Expression<String>? dedupKey,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (packageName != null) 'package_name': packageName,
+      if (rawTitle != null) 'raw_title': rawTitle,
+      if (rawText != null) 'raw_text': rawText,
+      if (capturedAt != null) 'captured_at': capturedAt,
+      if (amount != null) 'amount': amount,
+      if (direction != null) 'direction': direction,
+      if (parseStatus != null) 'parse_status': parseStatus,
+      if (suggestedWalletId != null) 'suggested_wallet_id': suggestedWalletId,
+      if (suggestedCategory != null) 'suggested_category': suggestedCategory,
+      if (status != null) 'status': status,
+      if (resultingTxnId != null) 'resulting_txn_id': resultingTxnId,
+      if (dedupKey != null) 'dedup_key': dedupKey,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NotificationCapturesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? packageName,
+      Value<String?>? rawTitle,
+      Value<String>? rawText,
+      Value<DateTime>? capturedAt,
+      Value<int?>? amount,
+      Value<CaptureDirection?>? direction,
+      Value<ParseStatus>? parseStatus,
+      Value<String?>? suggestedWalletId,
+      Value<String?>? suggestedCategory,
+      Value<CaptureStatus>? status,
+      Value<String?>? resultingTxnId,
+      Value<String>? dedupKey,
+      Value<int>? rowid}) {
+    return NotificationCapturesCompanion(
+      id: id ?? this.id,
+      packageName: packageName ?? this.packageName,
+      rawTitle: rawTitle ?? this.rawTitle,
+      rawText: rawText ?? this.rawText,
+      capturedAt: capturedAt ?? this.capturedAt,
+      amount: amount ?? this.amount,
+      direction: direction ?? this.direction,
+      parseStatus: parseStatus ?? this.parseStatus,
+      suggestedWalletId: suggestedWalletId ?? this.suggestedWalletId,
+      suggestedCategory: suggestedCategory ?? this.suggestedCategory,
+      status: status ?? this.status,
+      resultingTxnId: resultingTxnId ?? this.resultingTxnId,
+      dedupKey: dedupKey ?? this.dedupKey,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (packageName.present) {
+      map['package_name'] = Variable<String>(packageName.value);
+    }
+    if (rawTitle.present) {
+      map['raw_title'] = Variable<String>(rawTitle.value);
+    }
+    if (rawText.present) {
+      map['raw_text'] = Variable<String>(rawText.value);
+    }
+    if (capturedAt.present) {
+      map['captured_at'] = Variable<DateTime>(capturedAt.value);
+    }
+    if (amount.present) {
+      map['amount'] = Variable<int>(amount.value);
+    }
+    if (direction.present) {
+      map['direction'] = Variable<String>($NotificationCapturesTable
+          .$converterdirectionn
+          .toSql(direction.value));
+    }
+    if (parseStatus.present) {
+      map['parse_status'] = Variable<String>($NotificationCapturesTable
+          .$converterparseStatus
+          .toSql(parseStatus.value));
+    }
+    if (suggestedWalletId.present) {
+      map['suggested_wallet_id'] = Variable<String>(suggestedWalletId.value);
+    }
+    if (suggestedCategory.present) {
+      map['suggested_category'] = Variable<String>(suggestedCategory.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(
+          $NotificationCapturesTable.$converterstatus.toSql(status.value));
+    }
+    if (resultingTxnId.present) {
+      map['resulting_txn_id'] = Variable<String>(resultingTxnId.value);
+    }
+    if (dedupKey.present) {
+      map['dedup_key'] = Variable<String>(dedupKey.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NotificationCapturesCompanion(')
+          ..write('id: $id, ')
+          ..write('packageName: $packageName, ')
+          ..write('rawTitle: $rawTitle, ')
+          ..write('rawText: $rawText, ')
+          ..write('capturedAt: $capturedAt, ')
+          ..write('amount: $amount, ')
+          ..write('direction: $direction, ')
+          ..write('parseStatus: $parseStatus, ')
+          ..write('suggestedWalletId: $suggestedWalletId, ')
+          ..write('suggestedCategory: $suggestedCategory, ')
+          ..write('status: $status, ')
+          ..write('resultingTxnId: $resultingTxnId, ')
+          ..write('dedupKey: $dedupKey, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $WalletsTable wallets = $WalletsTable(this);
   late final $TxnsTable txns = $TxnsTable(this);
   late final $AppCategoriesTable appCategories = $AppCategoriesTable(this);
+  late final $NotificationCapturesTable notificationCaptures =
+      $NotificationCapturesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [wallets, txns, appCategories];
+      [wallets, txns, appCategories, notificationCaptures];
 }
 
 typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
@@ -1326,6 +2140,7 @@ typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
   required String name,
   Value<int> initialBalance,
   Value<String> type,
+  Value<String?> packageName,
   Value<int> rowid,
 });
 typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
@@ -1333,6 +2148,7 @@ typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
   Value<String> name,
   Value<int> initialBalance,
   Value<String> type,
+  Value<String?> packageName,
   Value<int> rowid,
 });
 
@@ -1357,6 +2173,9 @@ class $$WalletsTableFilterComposer
 
   ColumnFilters<String> get type => $composableBuilder(
       column: $table.type, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnFilters(column));
 }
 
 class $$WalletsTableOrderingComposer
@@ -1380,6 +2199,9 @@ class $$WalletsTableOrderingComposer
 
   ColumnOrderings<String> get type => $composableBuilder(
       column: $table.type, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnOrderings(column));
 }
 
 class $$WalletsTableAnnotationComposer
@@ -1402,6 +2224,9 @@ class $$WalletsTableAnnotationComposer
 
   GeneratedColumn<String> get type =>
       $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => column);
 }
 
 class $$WalletsTableTableManager extends RootTableManager<
@@ -1431,6 +2256,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             Value<String> name = const Value.absent(),
             Value<int> initialBalance = const Value.absent(),
             Value<String> type = const Value.absent(),
+            Value<String?> packageName = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion(
@@ -1438,6 +2264,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             name: name,
             initialBalance: initialBalance,
             type: type,
+            packageName: packageName,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1445,6 +2272,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             required String name,
             Value<int> initialBalance = const Value.absent(),
             Value<String> type = const Value.absent(),
+            Value<String?> packageName = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion.insert(
@@ -1452,6 +2280,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             name: name,
             initialBalance: initialBalance,
             type: type,
+            packageName: packageName,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -1487,6 +2316,8 @@ typedef $$TxnsTableCreateCompanionBuilder = TxnsCompanion Function({
   Value<bool> starred,
   Value<String?> walletFromName,
   Value<String?> walletToName,
+  Value<SourceType> source,
+  Value<bool> affectsBalance,
   Value<int> rowid,
 });
 typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
@@ -1503,6 +2334,8 @@ typedef $$TxnsTableUpdateCompanionBuilder = TxnsCompanion Function({
   Value<bool> starred,
   Value<String?> walletFromName,
   Value<String?> walletToName,
+  Value<SourceType> source,
+  Value<bool> affectsBalance,
   Value<int> rowid,
 });
 
@@ -1553,6 +2386,15 @@ class $$TxnsTableFilterComposer extends Composer<_$AppDatabase, $TxnsTable> {
 
   ColumnFilters<String> get walletToName => $composableBuilder(
       column: $table.walletToName, builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<SourceType, SourceType, String> get source =>
+      $composableBuilder(
+          column: $table.source,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnFilters<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance,
+      builder: (column) => ColumnFilters(column));
 }
 
 class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
@@ -1603,6 +2445,13 @@ class $$TxnsTableOrderingComposer extends Composer<_$AppDatabase, $TxnsTable> {
   ColumnOrderings<String> get walletToName => $composableBuilder(
       column: $table.walletToName,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get source => $composableBuilder(
+      column: $table.source, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$TxnsTableAnnotationComposer
@@ -1652,6 +2501,12 @@ class $$TxnsTableAnnotationComposer
 
   GeneratedColumn<String> get walletToName => $composableBuilder(
       column: $table.walletToName, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<SourceType, String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<bool> get affectsBalance => $composableBuilder(
+      column: $table.affectsBalance, builder: (column) => column);
 }
 
 class $$TxnsTableTableManager extends RootTableManager<
@@ -1690,6 +2545,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             Value<bool> starred = const Value.absent(),
             Value<String?> walletFromName = const Value.absent(),
             Value<String?> walletToName = const Value.absent(),
+            Value<SourceType> source = const Value.absent(),
+            Value<bool> affectsBalance = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion(
@@ -1706,6 +2563,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             starred: starred,
             walletFromName: walletFromName,
             walletToName: walletToName,
+            source: source,
+            affectsBalance: affectsBalance,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -1722,6 +2581,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             Value<bool> starred = const Value.absent(),
             Value<String?> walletFromName = const Value.absent(),
             Value<String?> walletToName = const Value.absent(),
+            Value<SourceType> source = const Value.absent(),
+            Value<bool> affectsBalance = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TxnsCompanion.insert(
@@ -1738,6 +2599,8 @@ class $$TxnsTableTableManager extends RootTableManager<
             starred: starred,
             walletFromName: walletFromName,
             walletToName: walletToName,
+            source: source,
+            affectsBalance: affectsBalance,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -1962,6 +2825,318 @@ typedef $$AppCategoriesTableProcessedTableManager = ProcessedTableManager<
     ),
     AppCategory,
     PrefetchHooks Function()>;
+typedef $$NotificationCapturesTableCreateCompanionBuilder
+    = NotificationCapturesCompanion Function({
+  required String id,
+  required String packageName,
+  Value<String?> rawTitle,
+  required String rawText,
+  required DateTime capturedAt,
+  Value<int?> amount,
+  Value<CaptureDirection?> direction,
+  Value<ParseStatus> parseStatus,
+  Value<String?> suggestedWalletId,
+  Value<String?> suggestedCategory,
+  Value<CaptureStatus> status,
+  Value<String?> resultingTxnId,
+  required String dedupKey,
+  Value<int> rowid,
+});
+typedef $$NotificationCapturesTableUpdateCompanionBuilder
+    = NotificationCapturesCompanion Function({
+  Value<String> id,
+  Value<String> packageName,
+  Value<String?> rawTitle,
+  Value<String> rawText,
+  Value<DateTime> capturedAt,
+  Value<int?> amount,
+  Value<CaptureDirection?> direction,
+  Value<ParseStatus> parseStatus,
+  Value<String?> suggestedWalletId,
+  Value<String?> suggestedCategory,
+  Value<CaptureStatus> status,
+  Value<String?> resultingTxnId,
+  Value<String> dedupKey,
+  Value<int> rowid,
+});
+
+class $$NotificationCapturesTableFilterComposer
+    extends Composer<_$AppDatabase, $NotificationCapturesTable> {
+  $$NotificationCapturesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get rawTitle => $composableBuilder(
+      column: $table.rawTitle, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get rawText => $composableBuilder(
+      column: $table.rawText, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get capturedAt => $composableBuilder(
+      column: $table.capturedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get amount => $composableBuilder(
+      column: $table.amount, builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<CaptureDirection?, CaptureDirection, String>
+      get direction => $composableBuilder(
+          column: $table.direction,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnWithTypeConverterFilters<ParseStatus, ParseStatus, String>
+      get parseStatus => $composableBuilder(
+          column: $table.parseStatus,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnFilters<String> get suggestedWalletId => $composableBuilder(
+      column: $table.suggestedWalletId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get suggestedCategory => $composableBuilder(
+      column: $table.suggestedCategory,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnWithTypeConverterFilters<CaptureStatus, CaptureStatus, String>
+      get status => $composableBuilder(
+          column: $table.status,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
+
+  ColumnFilters<String> get resultingTxnId => $composableBuilder(
+      column: $table.resultingTxnId,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get dedupKey => $composableBuilder(
+      column: $table.dedupKey, builder: (column) => ColumnFilters(column));
+}
+
+class $$NotificationCapturesTableOrderingComposer
+    extends Composer<_$AppDatabase, $NotificationCapturesTable> {
+  $$NotificationCapturesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get rawTitle => $composableBuilder(
+      column: $table.rawTitle, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get rawText => $composableBuilder(
+      column: $table.rawText, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get capturedAt => $composableBuilder(
+      column: $table.capturedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get amount => $composableBuilder(
+      column: $table.amount, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get direction => $composableBuilder(
+      column: $table.direction, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get parseStatus => $composableBuilder(
+      column: $table.parseStatus, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get suggestedWalletId => $composableBuilder(
+      column: $table.suggestedWalletId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get suggestedCategory => $composableBuilder(
+      column: $table.suggestedCategory,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get status => $composableBuilder(
+      column: $table.status, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get resultingTxnId => $composableBuilder(
+      column: $table.resultingTxnId,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get dedupKey => $composableBuilder(
+      column: $table.dedupKey, builder: (column) => ColumnOrderings(column));
+}
+
+class $$NotificationCapturesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NotificationCapturesTable> {
+  $$NotificationCapturesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get packageName => $composableBuilder(
+      column: $table.packageName, builder: (column) => column);
+
+  GeneratedColumn<String> get rawTitle =>
+      $composableBuilder(column: $table.rawTitle, builder: (column) => column);
+
+  GeneratedColumn<String> get rawText =>
+      $composableBuilder(column: $table.rawText, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get capturedAt => $composableBuilder(
+      column: $table.capturedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get amount =>
+      $composableBuilder(column: $table.amount, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<CaptureDirection?, String> get direction =>
+      $composableBuilder(column: $table.direction, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<ParseStatus, String> get parseStatus =>
+      $composableBuilder(
+          column: $table.parseStatus, builder: (column) => column);
+
+  GeneratedColumn<String> get suggestedWalletId => $composableBuilder(
+      column: $table.suggestedWalletId, builder: (column) => column);
+
+  GeneratedColumn<String> get suggestedCategory => $composableBuilder(
+      column: $table.suggestedCategory, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<CaptureStatus, String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get resultingTxnId => $composableBuilder(
+      column: $table.resultingTxnId, builder: (column) => column);
+
+  GeneratedColumn<String> get dedupKey =>
+      $composableBuilder(column: $table.dedupKey, builder: (column) => column);
+}
+
+class $$NotificationCapturesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $NotificationCapturesTable,
+    NotificationCapture,
+    $$NotificationCapturesTableFilterComposer,
+    $$NotificationCapturesTableOrderingComposer,
+    $$NotificationCapturesTableAnnotationComposer,
+    $$NotificationCapturesTableCreateCompanionBuilder,
+    $$NotificationCapturesTableUpdateCompanionBuilder,
+    (
+      NotificationCapture,
+      BaseReferences<_$AppDatabase, $NotificationCapturesTable,
+          NotificationCapture>
+    ),
+    NotificationCapture,
+    PrefetchHooks Function()> {
+  $$NotificationCapturesTableTableManager(
+      _$AppDatabase db, $NotificationCapturesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NotificationCapturesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NotificationCapturesTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NotificationCapturesTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> packageName = const Value.absent(),
+            Value<String?> rawTitle = const Value.absent(),
+            Value<String> rawText = const Value.absent(),
+            Value<DateTime> capturedAt = const Value.absent(),
+            Value<int?> amount = const Value.absent(),
+            Value<CaptureDirection?> direction = const Value.absent(),
+            Value<ParseStatus> parseStatus = const Value.absent(),
+            Value<String?> suggestedWalletId = const Value.absent(),
+            Value<String?> suggestedCategory = const Value.absent(),
+            Value<CaptureStatus> status = const Value.absent(),
+            Value<String?> resultingTxnId = const Value.absent(),
+            Value<String> dedupKey = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              NotificationCapturesCompanion(
+            id: id,
+            packageName: packageName,
+            rawTitle: rawTitle,
+            rawText: rawText,
+            capturedAt: capturedAt,
+            amount: amount,
+            direction: direction,
+            parseStatus: parseStatus,
+            suggestedWalletId: suggestedWalletId,
+            suggestedCategory: suggestedCategory,
+            status: status,
+            resultingTxnId: resultingTxnId,
+            dedupKey: dedupKey,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String packageName,
+            Value<String?> rawTitle = const Value.absent(),
+            required String rawText,
+            required DateTime capturedAt,
+            Value<int?> amount = const Value.absent(),
+            Value<CaptureDirection?> direction = const Value.absent(),
+            Value<ParseStatus> parseStatus = const Value.absent(),
+            Value<String?> suggestedWalletId = const Value.absent(),
+            Value<String?> suggestedCategory = const Value.absent(),
+            Value<CaptureStatus> status = const Value.absent(),
+            Value<String?> resultingTxnId = const Value.absent(),
+            required String dedupKey,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              NotificationCapturesCompanion.insert(
+            id: id,
+            packageName: packageName,
+            rawTitle: rawTitle,
+            rawText: rawText,
+            capturedAt: capturedAt,
+            amount: amount,
+            direction: direction,
+            parseStatus: parseStatus,
+            suggestedWalletId: suggestedWalletId,
+            suggestedCategory: suggestedCategory,
+            status: status,
+            resultingTxnId: resultingTxnId,
+            dedupKey: dedupKey,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$NotificationCapturesTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $NotificationCapturesTable,
+        NotificationCapture,
+        $$NotificationCapturesTableFilterComposer,
+        $$NotificationCapturesTableOrderingComposer,
+        $$NotificationCapturesTableAnnotationComposer,
+        $$NotificationCapturesTableCreateCompanionBuilder,
+        $$NotificationCapturesTableUpdateCompanionBuilder,
+        (
+          NotificationCapture,
+          BaseReferences<_$AppDatabase, $NotificationCapturesTable,
+              NotificationCapture>
+        ),
+        NotificationCapture,
+        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1971,4 +3146,6 @@ class $AppDatabaseManager {
   $$TxnsTableTableManager get txns => $$TxnsTableTableManager(_db, _db.txns);
   $$AppCategoriesTableTableManager get appCategories =>
       $$AppCategoriesTableTableManager(_db, _db.appCategories);
+  $$NotificationCapturesTableTableManager get notificationCaptures =>
+      $$NotificationCapturesTableTableManager(_db, _db.notificationCaptures);
 }

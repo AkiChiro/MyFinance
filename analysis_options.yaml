@@ -2,7 +2,7 @@ include: package:flutter_lints/flutter.yaml
 
 analyzer:
   exclude:
-    - "**/*.g.dart"
+    - "myfinance/**"   # stale snapshot directory; real source lives at root lib/
 
 linter:
   rules:

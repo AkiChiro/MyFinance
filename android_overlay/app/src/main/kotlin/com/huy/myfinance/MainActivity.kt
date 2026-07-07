@@ -2,7 +2,9 @@ package com.huy.myfinance
 
 import android.content.Context
 import android.os.Bundle
+import com.huy.myfinance.pigeon.CaptureHostApi
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
 
 /**
  * Standard FlutterActivity. Flutter plugins (including home_widget) are
@@ -24,6 +26,14 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWidgetIntent()
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        CaptureHostApi.setUp(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CaptureHostApiImpl(applicationContext),
+        )
     }
 
     private fun handleWidgetIntent() {

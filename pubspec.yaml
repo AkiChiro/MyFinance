@@ -30,6 +30,9 @@ dependencies:
   # P2 — charts
   fl_chart: ^0.69.0
 
+  # Dependency injection / state management
+  flutter_riverpod: ^3.0.0
+
   # Settings persistence
   shared_preferences: ^2.3.0
 
@@ -46,6 +49,7 @@ dev_dependencies:
   drift_dev: ^2.18.0
   build_runner: ^2.4.11
   flutter_lints: ^4.0.0
+  pigeon: ^22.0.0
 
 flutter:
   uses-material-design: true

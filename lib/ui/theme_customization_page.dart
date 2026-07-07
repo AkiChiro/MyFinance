@@ -2,8 +2,10 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../main.dart' show settings;
+import '../providers.dart';
+import '../services/app_settings.dart';
 
 // Preset palette used in all color pickers
 const _palette = <Color>[
@@ -26,141 +28,139 @@ const _palette = <Color>[
   Color(0xFF000000), Color(0xFF9E9E9E),
 ];
 
-class ThemeCustomizationPage extends StatelessWidget {
+class ThemeCustomizationPage extends ConsumerWidget {
   const ThemeCustomizationPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: settings,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Tuỳ chỉnh giao diện'),
-          actions: [
-            TextButton(
-              onPressed: () => _resetAll(context),
-              child: const Text('Đặt lại'),
-            ),
-          ],
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // ── Colors ────────────────────────────────────────────────────────
-            _sectionHeader(context, 'Màu sắc'),
-            Card(
-              child: Column(
-                children: [
-                  _ColorPickerTile(
-                    icon: Icons.palette_outlined,
-                    title: 'Màu chủ đề',
-                    subtitle:
-                        'Ảnh hưởng tới nút, thanh tiêu đề và toàn bộ bảng màu.',
-                    color: Color(settings.themeSeedColor),
-                    nullable: false,
-                    onChanged: (c) {
-                      if (c != null) {
-                        // ignore: deprecated_member_use
-                        settings.themeSeedColor = c.value;
-                      }
-                    },
-                  ),
-                  const Divider(height: 1),
-                  _ColorPickerTile(
-                    icon: Icons.format_paint_outlined,
-                    title: 'Màu nền ứng dụng',
-                    subtitle: 'Màu nền của màn hình. '
-                        '"Tự động" dùng màu mặc định theo chế độ sáng/tối.',
-                    color: settings.scaffoldBgColor,
-                    nullable: true,
-                    onChanged: (c) => settings.scaffoldBgColor = c,
-                  ),
-                  const Divider(height: 1),
-                  _ColorPickerTile(
-                    icon: Icons.font_download_outlined,
-                    title: 'Màu chữ',
-                    subtitle:
-                        '"Tự động" theo chế độ sáng/tối. Cẩn thận khi chọn '
-                        'màu tương phản thấp.',
-                    color: settings.fontColor,
-                    nullable: true,
-                    onChanged: (c) => settings.fontColor = c,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Background image ──────────────────────────────────────────────
-            _sectionHeader(context, 'Ảnh nền'),
-            Card(
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.image_outlined),
-                    title: const Text('Chọn ảnh nền'),
-                    subtitle: const Text(
-                        'Ảnh hiển thị phía sau toàn bộ màn hình.'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _pickImage(context),
-                  ),
-                  if (settings.bgImagePath != null) ...[
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(
-                          File(settings.bgImagePath!),
-                          height: 120,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const SizedBox(
-                              height: 40,
-                              child: Center(
-                                  child: Text('Không tìm thấy ảnh'))),
-                        ),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: Icon(Icons.delete_outline,
-                          color: Theme.of(context).colorScheme.error),
-                      title: Text('Xoá ảnh nền',
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
-                      onTap: () => settings.bgImagePath = null,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Note ──────────────────────────────────────────────────────────
-            Card(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline,
-                        size: 16,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Khi dùng ảnh nền, nền ứng dụng sẽ tự động trong suốt '
-                        'để hiện ảnh phía sau.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tuỳ chỉnh giao diện'),
+        actions: [
+          TextButton(
+            onPressed: () => _resetAll(context, settings),
+            child: const Text('Đặt lại'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // ── Colors ────────────────────────────────────────────────────────
+          _sectionHeader(context, 'Màu sắc'),
+          Card(
+            child: Column(
+              children: [
+                _ColorPickerTile(
+                  icon: Icons.palette_outlined,
+                  title: 'Màu chủ đề',
+                  subtitle:
+                      'Ảnh hưởng tới nút, thanh tiêu đề và toàn bộ bảng màu.',
+                  color: Color(settings.themeSeedColor),
+                  nullable: false,
+                  onChanged: (c) {
+                    if (c != null) {
+                      // ignore: deprecated_member_use
+                      settings.themeSeedColor = c.value;
+                    }
+                  },
                 ),
+                const Divider(height: 1),
+                _ColorPickerTile(
+                  icon: Icons.format_paint_outlined,
+                  title: 'Màu nền ứng dụng',
+                  subtitle: 'Màu nền của màn hình. '
+                      '"Tự động" dùng màu mặc định theo chế độ sáng/tối.',
+                  color: settings.scaffoldBgColor,
+                  nullable: true,
+                  onChanged: (c) => settings.scaffoldBgColor = c,
+                ),
+                const Divider(height: 1),
+                _ColorPickerTile(
+                  icon: Icons.font_download_outlined,
+                  title: 'Màu chữ',
+                  subtitle:
+                      '"Tự động" theo chế độ sáng/tối. Cẩn thận khi chọn '
+                      'màu tương phản thấp.',
+                  color: settings.fontColor,
+                  nullable: true,
+                  onChanged: (c) => settings.fontColor = c,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Background image ──────────────────────────────────────────────
+          _sectionHeader(context, 'Ảnh nền'),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.image_outlined),
+                  title: const Text('Chọn ảnh nền'),
+                  subtitle: const Text(
+                      'Ảnh hiển thị phía sau toàn bộ màn hình.'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _pickImage(context, settings),
+                ),
+                if (settings.bgImagePath != null) ...[
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        File(settings.bgImagePath!),
+                        height: 120,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox(
+                            height: 40,
+                            child: Center(
+                                child: Text('Không tìm thấy ảnh'))),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: Icon(Icons.delete_outline,
+                        color: Theme.of(context).colorScheme.error),
+                    title: Text('Xoá ảnh nền',
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error)),
+                    onTap: () => settings.bgImagePath = null,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Note ──────────────────────────────────────────────────────────
+          Card(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Khi dùng ảnh nền, nền ứng dụng sẽ tự động trong suốt '
+                      'để hiện ảnh phía sau.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -176,7 +176,7 @@ class ThemeCustomizationPage extends StatelessWidget {
     );
   }
 
-  Future<void> _pickImage(BuildContext context) async {
+  Future<void> _pickImage(BuildContext context, AppSettings settings) async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.image,
     );
@@ -184,7 +184,7 @@ class ThemeCustomizationPage extends StatelessWidget {
     if (path != null) settings.bgImagePath = path;
   }
 
-  Future<void> _resetAll(BuildContext context) async {
+  Future<void> _resetAll(BuildContext context, AppSettings settings) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

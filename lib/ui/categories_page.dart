@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
-import '../main.dart' show repository;
 import '../models/domain.dart';
+import '../providers.dart';
+import '../repositories/finance_repository.dart';
 
-class CategoriesPage extends StatefulWidget {
+class CategoriesPage extends ConsumerStatefulWidget {
   const CategoriesPage({super.key});
 
   @override
-  State<CategoriesPage> createState() => _CategoriesPageState();
+  ConsumerState<CategoriesPage> createState() => _CategoriesPageState();
 }
 
-class _CategoriesPageState extends State<CategoriesPage>
+class _CategoriesPageState extends ConsumerState<CategoriesPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
 
@@ -62,6 +64,7 @@ class _CategoriesPageState extends State<CategoriesPage>
   }
 
   Future<void> _showAddDialog(BuildContext context, String kind) async {
+    final repo = ref.read(repositoryProvider);
     final labelCtrl = TextEditingController();
     final threshCtrl = TextEditingController();
 
@@ -101,7 +104,7 @@ class _CategoriesPageState extends State<CategoriesPage>
               final label = labelCtrl.text.trim();
               if (label.isEmpty) return;
               final threshold = int.tryParse(threshCtrl.text) ?? 0;
-              await repository.addCategory(
+              await repo.addCategory(
                   label: label, kind: kind, threshold: threshold);
               if (ctx.mounted) Navigator.pop(ctx);
             },
@@ -117,14 +120,15 @@ class _CategoriesPageState extends State<CategoriesPage>
 
 // ── Category list ─────────────────────────────────────────────────────────────
 
-class _CategoryList extends StatelessWidget {
+class _CategoryList extends ConsumerWidget {
   const _CategoryList({required this.kind});
   final String kind;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repo = ref.read(repositoryProvider);
     return StreamBuilder<List<AppCategory>>(
-      stream: repository.watchActiveCategories(kind),
+      stream: repo.watchActiveCategories(kind),
       builder: (context, snap) {
         final cats = snap.data ?? [];
         if (cats.isEmpty) {
@@ -151,12 +155,12 @@ class _CategoryList extends StatelessWidget {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.edit_outlined),
-                        onPressed: () => _showEditDialog(context, cat),
+                        onPressed: () => _showEditDialog(context, cat, repo),
                       ),
                       IconButton(
                         icon: const Icon(Icons.archive_outlined),
                         tooltip: 'Lưu trữ danh mục',
-                        onPressed: () => _confirmArchive(context, cat),
+                        onPressed: () => _confirmArchive(context, cat, repo),
                       ),
                     ],
                   ),
@@ -168,7 +172,8 @@ class _CategoryList extends StatelessWidget {
     );
   }
 
-  Future<void> _showEditDialog(BuildContext context, AppCategory cat) async {
+  Future<void> _showEditDialog(
+      BuildContext context, AppCategory cat, FinanceRepository repo) async {
     final labelCtrl = TextEditingController(text: cat.label);
     final threshCtrl = TextEditingController(
         text: cat.threshold > 0 ? cat.threshold.toString() : '');
@@ -214,7 +219,7 @@ class _CategoryList extends StatelessWidget {
       final label = labelCtrl.text.trim();
       if (label.isEmpty) return;
       final threshold = int.tryParse(threshCtrl.text) ?? 0;
-      await repository.updateCategory(
+      await repo.updateCategory(
         AppCategory(
           id: cat.id,
           label: label,
@@ -230,7 +235,8 @@ class _CategoryList extends StatelessWidget {
     threshCtrl.dispose();
   }
 
-  Future<void> _confirmArchive(BuildContext context, AppCategory cat) async {
+  Future<void> _confirmArchive(
+      BuildContext context, AppCategory cat, FinanceRepository repo) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -247,6 +253,6 @@ class _CategoryList extends StatelessWidget {
         ],
       ),
     );
-    if (ok == true) await repository.archiveCategory(cat.id);
+    if (ok == true) await repo.archiveCategory(cat.id);
   }
 }

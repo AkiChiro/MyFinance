@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_widget/home_widget.dart';
 
+import '../providers.dart';
 import 'analytics_page.dart';
 import 'quick_add_page.dart';
 import 'settings_page.dart';
 import 'transactions_page.dart';
 import 'wallets_page.dart';
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key, this.initialType});
 
   /// When set (e.g. from a widget/notification deep-link), the FAB opens
@@ -15,10 +17,10 @@ class HomePage extends StatefulWidget {
   final String? initialType;
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   int _index = 0;
 
   static const _titles = ['Ví', 'Giao dịch', 'Thống kê', 'Cài đặt'];
@@ -32,12 +34,10 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Handle cold-start from a widget button (initialType set by MainActivity).
     if (widget.initialType != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) =>
-          _openQuickAdd(initialType: widget.initialType));
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _openQuickAdd(initialType: widget.initialType));
     }
-    // Handle warm-start / resume from a widget button tap.
     try {
       HomeWidget.widgetClicked.listen(_onWidgetClicked);
       HomeWidget.getWidgetData<String>('pendingTxType').then((type) {
@@ -47,7 +47,9 @@ class _HomePageState extends State<HomePage> {
               (_) => _openQuickAdd(initialType: type));
         }
       });
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('HomeWidget error: $e\n$st');
+    }
   }
 
   void _onWidgetClicked(Uri? uri) {
@@ -64,6 +66,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final repo = ref.read(repositoryProvider);
+
     return Scaffold(
       appBar: AppBar(title: Text(_titles[_index])),
       body: IndexedStack(index: _index, children: _pages),
@@ -72,27 +76,43 @@ class _HomePageState extends State<HomePage> {
         icon: const Icon(Icons.add),
         label: const Text('Thêm'),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.account_balance_wallet_outlined),
-              selectedIcon: Icon(Icons.account_balance_wallet),
-              label: 'Ví'),
-          NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long),
-              label: 'Giao dịch'),
-          NavigationDestination(
-              icon: Icon(Icons.bar_chart_outlined),
-              selectedIcon: Icon(Icons.bar_chart),
-              label: 'Thống kê'),
-          NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Cài đặt'),
-        ],
+      bottomNavigationBar: StreamBuilder<int>(
+        stream: repo.pendingCaptureCount(),
+        builder: (context, snap) {
+          final captureCount = snap.data ?? 0;
+          return NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: [
+              const NavigationDestination(
+                  icon: Icon(Icons.account_balance_wallet_outlined),
+                  selectedIcon: Icon(Icons.account_balance_wallet),
+                  label: 'Ví'),
+              NavigationDestination(
+                icon: captureCount > 0
+                    ? Badge(
+                        label: Text('$captureCount'),
+                        child:
+                            const Icon(Icons.receipt_long_outlined))
+                    : const Icon(Icons.receipt_long_outlined),
+                selectedIcon: captureCount > 0
+                    ? Badge(
+                        label: Text('$captureCount'),
+                        child: const Icon(Icons.receipt_long))
+                    : const Icon(Icons.receipt_long),
+                label: 'Giao dịch',
+              ),
+              const NavigationDestination(
+                  icon: Icon(Icons.bar_chart_outlined),
+                  selectedIcon: Icon(Icons.bar_chart),
+                  label: 'Thống kê'),
+              const NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Cài đặt'),
+            ],
+          );
+        },
       ),
     );
   }

@@ -1,10 +1,11 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
-import '../main.dart' show repository;
 import '../models/domain.dart';
+import '../providers.dart';
 
 // ---------------------------------------------------------------------------
 // Category colours
@@ -52,119 +53,110 @@ class _Stats {
   int get prevNet => prevEarning - prevSpending;
   int get yearNet => yearEarning - yearSpending;
 
-  static _Stats fromTxns(List<Txn> txns, DateTime month) {
-    final prev = DateTime(month.year, month.month - 1);
-    int sp = 0, ea = 0, psp = 0, pea = 0, ysp = 0, yea = 0;
-    final scat = <String, int>{};
-    final ecat = <String, int>{};
-
-    for (final t in txns) {
-      if (t.imported) continue;
-      if (t.type == TxTypes.transfer) continue;
-
-      final inCurr =
-          t.timestamp.year == month.year && t.timestamp.month == month.month;
-      final inPrev =
-          t.timestamp.year == prev.year && t.timestamp.month == prev.month;
-      final inYear = t.timestamp.year == month.year;
-
-      if (t.type == TxTypes.spending) {
-        if (inCurr) {
-          sp += t.amount;
-          final cat = t.category ?? 'others';
-          scat[cat] = (scat[cat] ?? 0) + t.amount;
-        }
-        if (inPrev) psp += t.amount;
-        if (inYear) ysp += t.amount;
-      } else if (t.type == TxTypes.earning) {
-        if (inCurr) {
-          ea += t.amount;
-          final cat = t.category ?? 'others_earn';
-          ecat[cat] = (ecat[cat] ?? 0) + t.amount;
-        }
-        if (inPrev) pea += t.amount;
-        if (inYear) yea += t.amount;
-      }
-    }
-
-    return _Stats(
-      spending: sp,
-      earning: ea,
-      prevSpending: psp,
-      prevEarning: pea,
-      spendByCat: scat,
-      earnByCat: ecat,
-      yearSpending: ysp,
-      yearEarning: yea,
-    );
-  }
+  factory _Stats.fromBundle(AnalyticsBundle b) => _Stats(
+        spending: b.currSpending,
+        earning: b.currEarning,
+        prevSpending: b.prevSpending,
+        prevEarning: b.prevEarning,
+        spendByCat: b.spendByCat,
+        earnByCat: b.earnByCat,
+        yearSpending: b.yearSpending,
+        yearEarning: b.yearEarning,
+      );
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-class AnalyticsPage extends StatefulWidget {
+class AnalyticsPage extends ConsumerStatefulWidget {
   const AnalyticsPage({super.key});
 
   @override
-  State<AnalyticsPage> createState() => _AnalyticsPageState();
+  ConsumerState<AnalyticsPage> createState() => _AnalyticsPageState();
 }
 
-class _AnalyticsPageState extends State<AnalyticsPage> {
+class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
   late DateTime _month;
+  late Stream<AnalyticsBundle> _bundleStream;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _month = DateTime(now.year, now.month);
+    _bundleStream =
+        ref.read(repositoryProvider).watchAnalyticsBundle(_month);
   }
 
-  void _prevMonth() =>
-      setState(() => _month = DateTime(_month.year, _month.month - 1));
+  void _prevMonth() => setState(() {
+        _month = DateTime(_month.year, _month.month - 1);
+        _bundleStream =
+            ref.read(repositoryProvider).watchAnalyticsBundle(_month);
+      });
+
   void _nextMonth() {
     final next = DateTime(_month.year, _month.month + 1);
-    if (!next.isAfter(DateTime.now())) setState(() => _month = next);
+    if (!next.isAfter(DateTime.now())) {
+      setState(() {
+        _month = next;
+        _bundleStream =
+            ref.read(repositoryProvider).watchAnalyticsBundle(next);
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Txn>>(
-      stream: repository.watchTxns(),
-      builder: (context, snap) {
-        final txns = snap.data ?? const [];
-        final s = _Stats.fromTxns(txns, _month);
+    final repo = ref.read(repositoryProvider);
+    return StreamBuilder<List<AppCategory>>(
+      stream: repo.watchAllCategories(),
+      builder: (context, catSnap) {
+        final catLabels = {
+          for (final c in catSnap.data ?? const <AppCategory>[]) c.id: c.label
+        };
+        return StreamBuilder<AnalyticsBundle>(
+          stream: _bundleStream,
+          builder: (context, snap) {
+            final bundle = snap.data;
+            if (bundle == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final s = _Stats.fromBundle(bundle);
 
-        return ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
-            const SizedBox(height: 12),
-            _SummaryCards(stats: s),
-            const SizedBox(height: 16),
-            _BarSection(stats: s, month: _month),
-            const SizedBox(height: 16),
-            if (s.spendByCat.isNotEmpty) ...[
-              _PieSection(
-                title: 'Chi tiêu theo danh mục',
-                data: s.spendByCat,
-                total: s.spending,
-                colorOf: _spendColor,
-              ),
-              const SizedBox(height: 16),
-            ],
-            if (s.earnByCat.isNotEmpty) ...[
-              _PieSection(
-                title: 'Thu nhập theo danh mục',
-                data: s.earnByCat,
-                total: s.earning,
-                colorOf: _earnColor,
-              ),
-              const SizedBox(height: 16),
-            ],
-            _YearCard(stats: s, year: _month.year),
-            const SizedBox(height: 80),
-          ],
+            return ListView(
+              padding: const EdgeInsets.all(12),
+              children: [
+                _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
+                const SizedBox(height: 12),
+                _SummaryCards(stats: s),
+                const SizedBox(height: 16),
+                _BarSection(stats: s, month: _month),
+                const SizedBox(height: 16),
+                if (s.spendByCat.isNotEmpty) ...[
+                  _PieSection(
+                    title: 'Chi tiêu theo danh mục',
+                    data: s.spendByCat,
+                    total: s.spending,
+                    colorOf: _spendColor,
+                    catLabels: catLabels,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (s.earnByCat.isNotEmpty) ...[
+                  _PieSection(
+                    title: 'Thu nhập theo danh mục',
+                    data: s.earnByCat,
+                    total: s.earning,
+                    colorOf: _earnColor,
+                    catLabels: catLabels,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _YearCard(stats: s, year: _month.year),
+                const SizedBox(height: 80),
+              ],
+            );
+          },
         );
       },
     );
@@ -499,11 +491,13 @@ class _PieSection extends StatefulWidget {
     required this.data,
     required this.total,
     required this.colorOf,
+    required this.catLabels,
   });
   final String title;
   final Map<String, int> data;
   final int total;
   final Color Function(String) colorOf;
+  final Map<String, String> catLabels;
 
   @override
   State<_PieSection> createState() => _PieSectionState();
@@ -593,7 +587,8 @@ class _PieSectionState extends State<_PieSection> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                Categories.label(e.key),
+                                widget.catLabels[e.key] ??
+                                    Categories.label(e.key),
                                 style: const TextStyle(fontSize: 12),
                                 overflow: TextOverflow.ellipsis,
                               ),
