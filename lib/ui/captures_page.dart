@@ -5,6 +5,7 @@ import '../data/database.dart';
 import '../format.dart';
 import '../models/domain.dart';
 import '../providers.dart';
+import '../services/bank/bank_notification_parser.dart';
 import 'capture_confirm_page.dart';
 
 class CapturesPage extends ConsumerWidget {
@@ -52,9 +53,9 @@ class _CaptureTile extends StatelessWidget {
   final Map<String, String> walletMap;
 
   static const _bankLabels = <String, String>{
-    'com.ocb.app': 'OCB',
-    'com.mbmobile': 'MB',
-    'com.techcombank.mb': 'Techcombank',
+    BankPackages.ocb: 'OCB',
+    BankPackages.mb: 'MB',
+    BankPackages.techcombank: 'Techcombank',
   };
 
   @override
