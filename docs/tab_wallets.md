@@ -1,111 +1,172 @@
 # Ví Tab — Developer Reference
 
-File: `lib/ui/wallets_page.dart`
+Files: `lib/ui/wallets_page.dart`, `lib/ui/wallet_edit_page.dart`
 
 ## Overview
 
-The Ví tab shows all wallets, their current balances (derived from transaction history), and the total balance across all wallets. It provides wallet creation, bank-link configuration, and deletion.
+The Ví tab shows all wallets in user-defined order with their derived balances. Wallets can be dragged to reorder, tapped to edit, and created via the "Thêm ví" button. The total balance across all wallets is shown at the top.
 
 ## Widget tree
 
 ```
 WalletsPage (ConsumerWidget)
-  └─ StreamBuilder<List<Wallet>>      (repo.watchWallets())
-     └─ StreamBuilder<Map<String,int>> (repo.watchWalletBalances())
-        ├─ _Empty                     (if no wallets)
+  └─ StreamBuilder<List<Wallet>>       (repo.watchWallets())
+     └─ StreamBuilder<Map<String,int>>  (repo.watchWalletBalances())
+        ├─ _Empty                      (if no wallets)
         └─ ListView
            ├─ Card (total balance row)
-           ├─ Card (per-wallet ListTile) × N
+           ├─ ReorderableListView.builder (wallet cards × N)
+           │   └─ Card > ListTile
+           │       ├─ leading: ReorderableDragStartListener (drag handle icon)
+           │       ├─ title: wallet name
+           │       ├─ subtitle: type · bank label (if linked)
+           │       ├─ trailing: formatted VND balance
+           │       └─ onTap → push WalletEditPage
            └─ OutlinedButton "Thêm ví"
 ```
 
 ## Data sources
 
-- `repo.watchWallets()` — stream of all wallets ordered by name
+- `repo.watchWallets()` — stream of all wallets ordered by `sort_order, name`
 - `repo.watchWalletBalances()` — stream of `{walletId → int}` balance map; recomputed in SQL on every txns-table change
 
-Both are nested `StreamBuilder`s. The outer wallet list provides the wallet order; the inner balance map provides the derived balance for each wallet tile.
+## Wallet ordering
 
-## `_bankLabel(String? pkg) → String?`
+Wallets have a `sort_order INTEGER` column (schema v6). The `watchWallets()` query orders by `sort_order ASC, name ASC`. The `ReorderableListView.onReorder` callback calls `repo.updateWalletsOrder(orderedIds)` which updates all rows via `customStatement` in a single transaction.
 
-Top-level helper. Scans `_kBankOptions` for a matching `pkg`, returns the human label ("OCB", "MB", "Techcombank") or falls back to the raw package name string. Returns null if `pkg` is null (no link).
+New wallets are appended at the bottom: `sort_order = (SELECT COUNT(*) FROM wallets)` at insert time (raw SQL in `addWallet`).
 
-`_kBankOptions` uses `BankPackages.*` constants directly, so updating a constant automatically updates the label resolver without any additional changes.
+Initial `sort_order` for existing wallets is seeded by the v6 migration to match the previous alphabetical order, so drag state is preserved across upgrades.
 
-## Wallet tile (inline in `build`)
+## `ReorderableListView` setup
 
-Each wallet is a `Card > ListTile`:
-- Leading: `CircleAvatar` with bank or cash icon based on `w.type`
-- Title: wallet name
-- Subtitle: `WalletKinds.label(w.type)` + optional bank label joined with ` · `
-- Trailing: formatted VND balance (`balances[w.id] ?? 0`)
-- `onLongPress`: opens `_walletActionSheet`
+```dart
+ReorderableListView.builder(
+  shrinkWrap: true,
+  physics: const NeverScrollableScrollPhysics(),
+  buildDefaultDragHandles: false,          // we supply our own handle
+  itemBuilder: (context, i) => Card(
+    key: ValueKey(w.id),                   // required for ReorderableListView
+    child: ListTile(
+      leading: ReorderableDragStartListener(
+        index: i,
+        child: const Icon(Icons.drag_handle),
+      ),
+      ...
+      onTap: () => Navigator.push(..., WalletEditPage(wallet: w)),
+    ),
+  ),
+  onReorder: (oldIndex, newIndex) {
+    if (newIndex > oldIndex) newIndex--;   // Flutter reorder index adjustment
+    final reordered = [...wallets];
+    reordered.insert(newIndex, reordered.removeAt(oldIndex));
+    repo.updateWalletsOrder(reordered.map((w) => w.id).toList());
+  },
+)
+```
 
-## `_walletActionSheet(context, wallet, repo)`
+`buildDefaultDragHandles: false` is required to use `ReorderableDragStartListener` on a specific widget (the handle icon) instead of making the entire tile draggable.
 
-`showModalBottomSheet` with two `ListTile` options:
-1. **"Sửa liên kết ngân hàng"** → `_editBankLinkDialog`
-2. **"Xoá ví"** → `_confirmDelete`
+The `if (newIndex > oldIndex) newIndex--` adjustment is standard Flutter — when moving an item downward, the destination index arrives 1 too large because the removed item shifts remaining indices.
 
-## `_editBankLinkDialog(context, wallet, repo)`
+## Bank label helper
 
-`showDialog` with a `StatefulBuilder` (so the dropdown can rebuild within the dialog).
+`bankLabel(String? pkg)` from `bank_notification_parser.dart` (shared constant `kBankPickerOptions`) resolves package name to human label ("OCB", "MB", "Techcombank"), or returns null if `pkg` is null.
 
-Fields:
-- `DropdownButtonFormField<String?>` — bank picker, `initialValue: w.packageName`
-- Options: `null = "— Không liên kết —"`, then one per `_kBankOptions` entry
-
-On "Lưu":
-1. If `selectedPkg == w.packageName` → no-op, close.
-2. If `selectedPkg != null`: uniqueness check — `repo.walletByPackageName(newPkg)`.
-   - If existing wallet found **and** `existing.id != w.id` (self-exclusion guard): show conflict dialog.
-     - "Chuyển" → `repo.reassignWalletBankLink(newPkg, w.id)` → closes.
-     - "Huỷ" → stay open.
-   - No conflict → `repo.updateWalletPackageName(w.id, newPkg)` → closes.
-3. If `selectedPkg == null` → `repo.updateWalletPackageName(w.id, null)` → clears the link.
-
-**Self-exclusion guard:** `existing != null && existing.id != w.id` — when the wallet being edited already owns the selected package, `walletByPackageName` returns itself. Without this guard, it would falsely show the conflict dialog.
-
-## `_confirmDelete(context, wallet, repo)`
-
-`showDialog` with "Xoá ví / Huỷ". On confirm: `repo.deleteWallet(w.id)`. Transactions linked to the deleted wallet are retained in the DB (the wallet reference becomes stale — `resolveWallet` in `transactions_page.dart` falls back to the snapshot name stored at import time or "(ví khác)").
+Previously `wallets_page.dart` had its own private `_kBankOptions`/`_bankLabel`. These were removed in favour of the shared constant from `bank_notification_parser.dart` so all UI pickers stay in sync automatically when `BankPackages` constants change.
 
 ## `_addWalletDialog(context, repository)` (top-level function)
 
-`showDialog` with a `StatefulBuilder`. Exposed as `showAddWalletDialog(context, repo)` for call sites outside the widget class.
+`showDialog` with a `StatefulBuilder`. Exposed as `showAddWalletDialog(context, repo)`.
 
 Fields:
-- Name text field (required — save is no-op if empty after trim)
+- Name text field (required)
 - Balance number field (`parseAmount(text)`)
 - `SegmentedButton<String>` for type: Tiền mặt / Ngân hàng
-- `DropdownButtonFormField<String?>` for bank link (same `_kBankOptions` list)
+- `DropdownButtonFormField<String?>` for bank link (from `kBankPickerOptions`)
 
 On "Lưu":
 1. If `name.isEmpty` → return.
 2. If `pkg != null`: uniqueness check → `repo.walletByPackageName(pkg)`.
    - If existing found: conflict dialog "Chuyển sang ví mới?".
-     - "Chuyển":
-       ```
-       newId = await repo.addWallet(name, balance, type, packageName: null)
-       await repo.reassignWalletBankLink(pkg, newId)
-       ```
-       This creates the wallet without the package first (to get its ID), then atomically moves the link.
-     - "Huỷ" → return without creating.
+     - "Chuyển": create wallet without pkg, then `repo.reassignWalletBankLink(pkg, newId)`.
+     - "Huỷ" → return.
    - No conflict → `repo.addWallet(name, balance, type, packageName: pkg)`.
-3. If `pkg == null` → `repo.addWallet(name, balance, type)`.
 
 ## `_Empty` widget
 
-Shown when `wallets.isEmpty`. Center column with a wallet icon, "Chưa có ví nào." text, and a "Thêm ví" FilledButton.
+Shown when `wallets.isEmpty`. Center column with wallet icon and a "Thêm ví" FilledButton.
+
+---
+
+## `WalletEditPage`
+
+File: `lib/ui/wallet_edit_page.dart`
+
+Full-page edit screen pushed by tapping any wallet tile.
+
+### Widget tree
+
+```
+WalletEditPage (ConsumerStatefulWidget)
+  └─ _WalletEditPageState
+     └─ Scaffold
+        ├─ AppBar (title: "Sửa ví", actions: [delete IconButton])
+        └─ ListView
+           ├─ TextField (Tên ví)
+           ├─ TextField (Số dư ban đầu, digits only)
+           ├─ SegmentedButton (Tiền mặt / Ngân hàng)
+           ├─ DropdownButtonFormField (Ngân hàng liên kết)
+           └─ FilledButton.icon "Lưu thay đổi"
+```
+
+### State
+
+| Field | Type | Initialized from |
+|-------|------|-----------------|
+| `_name` | `TextEditingController` | `wallet.name` |
+| `_balance` | `TextEditingController` | `wallet.initialBalance.toString()` |
+| `_type` | `String` | `wallet.type` |
+| `_pkg` | `String?` | `wallet.packageName` |
+| `_saving` | `bool` | `false` (loading guard) |
+
+### `_save(context, repo)`
+
+1. Validate `_name.text.trim()` — snack and return if empty.
+2. If `_pkg != null && _pkg != wallet.packageName` (bank link changed):
+   - Uniqueness check: `repo.walletByPackageName(newPkg)`.
+   - If conflict (other wallet holds this pkg): show conflict dialog.
+     - On confirm: `repo.updateWallet(id, ..., packageName: const Value(null))` then `repo.reassignWalletBankLink(newPkg, wallet.id)`.
+     - On cancel: reset `_saving`, return.
+3. Otherwise: `repo.updateWallet(id, name, balance, type, packageName: Value(_pkg))`.
+4. `Navigator.pop(context)`.
+
+**Why clear pkg before reassign:** `updateWallet` with `packageName: const Value(null)` removes our wallet's current link before `reassignWalletBankLink` moves the target link. This keeps all operations within the unique index constraint.
+
+### Delete button
+
+`IconButton` in the app bar with error-colour `Icons.delete_outline`. Calls `_confirmDelete(context, repo)`.
+
+`_confirmDelete`: AlertDialog "Xoá ví `name`?" with an error-coloured FilledButton. On confirm: `repo.deleteWallet(wallet.id)` then `Navigator.pop(context)`.
+
+Transactions linked to the deleted wallet are retained (the wallet reference becomes stale).
+
+### `initialBalance` note
+
+Changing `initialBalance` directly shifts all derived balances. There is no archiving or transaction split on wallet parameter changes — this is a conscious simplicity tradeoff (the user requested archiving as optional; it was not implemented).
+
+---
 
 ## Key repository calls
 
 | Call | Effect |
 |------|--------|
-| `repo.watchWallets()` | stream of wallets |
+| `repo.watchWallets()` | stream of wallets ordered by sort_order, name |
 | `repo.watchWalletBalances()` | stream of balance map |
-| `repo.addWallet(name, initialBalance, type, packageName?)` | creates wallet, returns new UUID |
-| `repo.updateWalletPackageName(id, pkg?)` | sets or clears package link for one wallet |
+| `repo.addWallet(name, initialBalance, type, packageName?)` | creates wallet, appends at sort order bottom, returns new UUID |
+| `repo.updateWallet(id, name, initialBalance, type, packageName)` | updates all non-order fields |
+| `repo.updateWalletsOrder(List<String> ids)` | persists drag-reorder by writing sort_order for each wallet |
+| `repo.updateWalletPackageName(id, pkg?)` | sets or clears package link (used only from add dialog no-conflict path) |
 | `repo.walletByPackageName(pkg)` | uniqueness pre-check |
 | `repo.reassignWalletBankLink(pkg, newWalletId)` | atomic: clear pkg from old wallet, set on new wallet |
 | `repo.deleteWallet(id)` | deletes wallet row |

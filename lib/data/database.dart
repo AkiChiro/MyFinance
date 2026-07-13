@@ -18,6 +18,7 @@ class Wallets extends Table {
   TextColumn get type => text().withDefault(const Constant('cash'))();
   // nullable: at most one wallet maps to a given bank app package (ADR-0014).
   TextColumn get packageName => text().nullable()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -136,7 +137,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -188,6 +189,17 @@ class AppDatabase extends _$AppDatabase {
               'CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_pkg ON wallets(package_name) WHERE package_name IS NOT NULL',
             );
           }
+          if (from < 6) {
+            // Issue #4: user-controlled wallet ordering.
+            // Use raw SQL — build_runner hasn't regenerated wallets.sortOrder yet.
+            await customStatement(
+              'ALTER TABLE wallets ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0',
+            );
+            // Seed initial order alphabetically to match the previous sort.
+            await customStatement(
+              'UPDATE wallets SET sort_order = (SELECT COUNT(*) FROM wallets w2 WHERE w2.name < wallets.name)',
+            );
+          }
         },
       );
 
@@ -221,9 +233,22 @@ class AppDatabase extends _$AppDatabase {
 
   // ── Wallets ─────────────────────────────────────────────────────────────────
 
+  // Raw SQL keeps sort_order ordering without needing the generated accessor.
   Stream<List<Wallet>> watchWallets() =>
-      (select(wallets)..orderBy([(w) => OrderingTerm(expression: w.name)]))
-          .watch();
+      customSelect(
+        'SELECT * FROM wallets ORDER BY sort_order, name',
+        readsFrom: {wallets},
+      ).watch().map((rows) => rows.map((r) => wallets.map(r.data)).toList());
+
+  Future<void> updateWalletsOrder(List<String> orderedIds) =>
+      transaction(() async {
+        for (var i = 0; i < orderedIds.length; i++) {
+          await customStatement(
+            'UPDATE wallets SET sort_order = ? WHERE id = ?',
+            [i, orderedIds[i]],
+          );
+        }
+      });
 
   Future<List<Wallet>> allWallets() => select(wallets).get();
 

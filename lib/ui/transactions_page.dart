@@ -18,84 +18,156 @@ class TransactionsPage extends ConsumerStatefulWidget {
 
 class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   bool _starredOnly = false;
+  String? _typeFilter; // null = all, TxTypes.spending, TxTypes.earning
+  String? _categoryFilter;
+  bool _sortByAmount = false;
+
+  Widget _buildFilterBar(
+      BuildContext context, List<AppCategory> allCats, Map<String, String> catLabels) {
+    final typeCats = _typeFilter == null
+        ? const <AppCategory>[]
+        : allCats.where((c) => c.kind == _typeFilter && !c.archived).toList();
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(
+        children: [
+          ChoiceChip(
+            label: const Text('Tất cả'),
+            selected: _typeFilter == null,
+            onSelected: (_) => setState(() {
+              _typeFilter = null;
+              _categoryFilter = null;
+            }),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            label: const Text('Chi tiêu'),
+            selected: _typeFilter == TxTypes.spending,
+            onSelected: (_) => setState(() {
+              _typeFilter = TxTypes.spending;
+              _categoryFilter = null;
+            }),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            label: const Text('Thu nhập'),
+            selected: _typeFilter == TxTypes.earning,
+            onSelected: (_) => setState(() {
+              _typeFilter = TxTypes.earning;
+              _categoryFilter = null;
+            }),
+          ),
+          const SizedBox(width: 8),
+          FilterChip(
+            avatar: Icon(Icons.star,
+                size: 14,
+                color: _starredOnly ? Colors.amber.shade700 : null),
+            label: const Text('Có sao'),
+            selected: _starredOnly,
+            onSelected: (v) => setState(() => _starredOnly = v),
+          ),
+          if (_typeFilter != null) ...[
+            const SizedBox(width: 8),
+            FilterChip(
+              label: Text(_categoryFilter == null
+                  ? 'Danh mục'
+                  : (catLabels[_categoryFilter] ?? _categoryFilter!)),
+              selected: _categoryFilter != null,
+              onSelected: (_) => _pickCategory(context, typeCats),
+            ),
+          ],
+          const SizedBox(width: 8),
+          FilterChip(
+            avatar: const Icon(Icons.sort, size: 14),
+            label: const Text('Số tiền'),
+            selected: _sortByAmount,
+            onSelected: (v) => setState(() => _sortByAmount = v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickCategory(
+      BuildContext context, List<AppCategory> cats) async {
+    // Use a list wrapper so we can distinguish "dismissed" (null) from
+    // "all selected" ([null]) and "category selected" ([id]).
+    final picked = await showDialog<List<String?>>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text('Chọn danh mục'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, [null]),
+            child: const Text('Tất cả'),
+          ),
+          for (final c in cats)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, [c.id]),
+              child: Text(c.label),
+            ),
+        ],
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() => _categoryFilter = picked[0]);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
     final settings = ref.watch(settingsProvider);
-    return Column(
-      children: [
-        // ── Filter bar ───────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
-            children: [
-              ChoiceChip(
-                label: const Text('Tất cả'),
-                selected: !_starredOnly,
-                onSelected: (_) => setState(() => _starredOnly = false),
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.star, size: 14),
-                    SizedBox(width: 4),
-                    Text('Có sao'),
-                  ],
-                ),
-                selected: _starredOnly,
-                onSelected: (_) => setState(() => _starredOnly = true),
-              ),
-            ],
-          ),
-        ),
-        // ── Captures banner ──────────────────────────────────────────────────
-        StreamBuilder<int>(
-          stream: repo.pendingCaptureCount(),
-          builder: (context, snap) {
-            final count = snap.data ?? 0;
-            if (count == 0) return const SizedBox.shrink();
-            final scheme = Theme.of(context).colorScheme;
-            return Card(
-              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              color: scheme.primaryContainer,
-              child: ListTile(
-                leading: Badge(
-                  label: Text('$count'),
-                  child: Icon(Icons.notifications_outlined,
-                      color: scheme.onPrimaryContainer),
-                ),
-                title: Text(
-                  '$count thông báo ngân hàng chờ xác nhận',
-                  style: TextStyle(color: scheme.onPrimaryContainer),
-                ),
-                trailing:
-                    Icon(Icons.chevron_right, color: scheme.onPrimaryContainer),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const CapturesPage()),
-                ),
-              ),
-            );
-          },
-        ),
-        // ── List ─────────────────────────────────────────────────────────────
-        Expanded(
-          child: StreamBuilder<List<AppCategory>>(
-            stream: repo.watchAllCategories(),
-            builder: (context, catSnap) {
-              final catLabels = {
-                for (final c in catSnap.data ?? const <AppCategory>[])
-                  c.id: c.label
-              };
-              return StreamBuilder<List<Wallet>>(
+
+    return StreamBuilder<List<AppCategory>>(
+      stream: repo.watchAllCategories(),
+      builder: (context, catSnap) {
+        final allCats = catSnap.data ?? const <AppCategory>[];
+        final catLabels = {for (final c in allCats) c.id: c.label};
+
+        return Column(
+          children: [
+            // ── Filter bar ──────────────────────────────────────────────────
+            _buildFilterBar(context, allCats, catLabels),
+            // ── Captures banner ─────────────────────────────────────────────
+            StreamBuilder<int>(
+              stream: repo.pendingCaptureCount(),
+              builder: (context, snap) {
+                final count = snap.data ?? 0;
+                if (count == 0) return const SizedBox.shrink();
+                final scheme = Theme.of(context).colorScheme;
+                return Card(
+                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  color: scheme.primaryContainer,
+                  child: ListTile(
+                    leading: Badge(
+                      label: Text('$count'),
+                      child: Icon(Icons.notifications_outlined,
+                          color: scheme.onPrimaryContainer),
+                    ),
+                    title: Text(
+                      '$count thông báo ngân hàng chờ xác nhận',
+                      style: TextStyle(color: scheme.onPrimaryContainer),
+                    ),
+                    trailing: Icon(Icons.chevron_right,
+                        color: scheme.onPrimaryContainer),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const CapturesPage()),
+                    ),
+                  ),
+                );
+              },
+            ),
+            // ── List ────────────────────────────────────────────────────────
+            Expanded(
+              child: StreamBuilder<List<Wallet>>(
                 stream: repo.watchWallets(),
                 builder: (context, wSnap) {
                   final walletMap = {
                     for (final w in (wSnap.data ?? const [])) w.id: w.name
                   };
-                  // Load category thresholds for auto-star computation.
                   return FutureBuilder<Map<String, int>>(
                     future: repo.categoryThresholds(TxTypes.spending),
                     builder: (context, threshSnap) {
@@ -104,6 +176,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                         stream: repo.watchTxns(),
                         builder: (context, tSnap) {
                           var txns = tSnap.data ?? const [];
+                          // Apply filters.
                           if (_starredOnly) {
                             txns = txns
                                 .where((t) =>
@@ -112,6 +185,21 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                                         enabled: settings.autostarEnabled))
                                 .toList();
                           }
+                          if (_typeFilter != null) {
+                            txns = txns
+                                .where((t) => t.type == _typeFilter)
+                                .toList();
+                          }
+                          if (_categoryFilter != null) {
+                            txns = txns
+                                .where((t) => t.category == _categoryFilter)
+                                .toList();
+                          }
+                          if (_sortByAmount) {
+                            txns = [...txns]
+                              ..sort((a, b) => b.amount.compareTo(a.amount));
+                          }
+
                           if (txns.isEmpty) {
                             return Center(
                               child: Text(_starredOnly
@@ -126,12 +214,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                               txn: txns[i],
                               thresholds: thresholds,
                               catLabels: catLabels,
-                              walletName: (id) {
-                                if (walletMap.containsKey(id)) {
-                                  return walletMap[id]!;
-                                }
-                                return '(ví khác)';
-                              },
+                              walletName: (id) =>
+                                  walletMap.containsKey(id)
+                                      ? walletMap[id]!
+                                      : '(ví khác)',
                             ),
                           );
                         },
@@ -139,11 +225,11 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                     },
                   );
                 },
-              );
-            },
-          ),
-        ),
-      ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -181,7 +267,6 @@ class _TxnTile extends ConsumerWidget {
       _ => (Icons.swap_horiz, scheme.primary),
     };
 
-    // Wallet name resolution: live name → snapshot name → fallback.
     String resolveWallet(String? id, String? snapshot) {
       if (id == null || id.isEmpty) return snapshot ?? '(ví khác)';
       final live = walletName(id);
@@ -214,73 +299,46 @@ class _TxnTile extends ConsumerWidget {
         isAutoStarred(txn, thresholds, enabled: settings.autostarEnabled);
     final showStar = txn.starred || autoStar;
 
-    return Dismissible(
-      key: ValueKey(txn.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        color: scheme.errorContainer,
-        child: Icon(Icons.delete, color: scheme.onErrorContainer),
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: color.withValues(alpha: 0.12),
+        child: Icon(icon, color: color),
       ),
-      confirmDismiss: (_) async {
-        return await showDialog<bool>(
-              context: context,
-              builder: (_) => AlertDialog(
-                title: const Text('Xoá giao dịch?'),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Huỷ')),
-                  FilledButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Xoá')),
-                ],
+      title: Row(
+        children: [
+          Expanded(
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          if (showStar)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(
+                txn.starred ? Icons.star : Icons.star_border,
+                size: 16,
+                color: Colors.amber.shade600,
               ),
-            ) ??
-            false;
-      },
-      onDismissed: (_) => repo.deleteTxn(txn.id),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: color.withValues(alpha: 0.12),
-          child: Icon(icon, color: color),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-                child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-            if (showStar)
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(
-                  txn.starred ? Icons.star : Icons.star_border,
-                  size: 16,
-                  color: Colors.amber.shade600,
-                ),
-              ),
-            if (txn.imported)
-              Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: _Chip(label: 'đã nhập', scheme: scheme),
-              ),
-          ],
-        ),
-        subtitle: Text(subtitleParts.join(' · '),
-            maxLines: 2, overflow: TextOverflow.ellipsis),
-        trailing: Text(amountText,
-            style: TextStyle(color: color, fontWeight: FontWeight.w600)),
-        onTap: txn.imported
-            ? null
-            : () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => QuickAddPage(editing: txn),
-                )),
-        onLongPress: () => _showActionSheet(context, repo),
+            ),
+          if (txn.imported)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: _Chip(label: 'đã nhập', scheme: scheme),
+            ),
+        ],
       ),
+      subtitle: Text(subtitleParts.join(' · '),
+          maxLines: 2, overflow: TextOverflow.ellipsis),
+      trailing: Text(amountText,
+          style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+      onTap: txn.imported
+          ? null
+          : () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => QuickAddPage(editing: txn),
+              )),
+      onLongPress: () => _showActionSheet(context, repo, showStar: showStar),
     );
   }
 
-  void _showActionSheet(BuildContext context, FinanceRepository repo) {
+  void _showActionSheet(BuildContext context, FinanceRepository repo,
+      {required bool showStar}) {
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -300,11 +358,10 @@ class _TxnTile extends ConsumerWidget {
               ),
               ListTile(
                 leading: Icon(
-                  txn.starred ? Icons.star : Icons.star_border,
+                  showStar ? Icons.star : Icons.star_border,
                   color: Colors.amber.shade600,
                 ),
-                title:
-                    Text(txn.starred ? 'Bỏ đánh dấu sao' : 'Đánh dấu sao'),
+                title: Text(showStar ? 'Bỏ đánh dấu sao' : 'Đánh dấu sao'),
                 onTap: () {
                   Navigator.pop(ctx);
                   repo.toggleStar(txn);

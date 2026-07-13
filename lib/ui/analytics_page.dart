@@ -570,11 +570,8 @@ class _PieSectionState extends State<_PieSection> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: entries.map((e) {
-                      final pct = widget.total > 0
-                          ? e.value / widget.total * 100
-                          : 0.0;
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
                         child: Row(
                           children: [
                             Container(
@@ -594,7 +591,7 @@ class _PieSectionState extends State<_PieSection> {
                               ),
                             ),
                             Text(
-                              '${pct.toStringAsFixed(1)}%',
+                              formatVnd(e.value),
                               style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600),

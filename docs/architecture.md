@@ -41,7 +41,7 @@ All providers are declared in `lib/providers.dart` and overridden in `main()` wi
 
 `settingsProvider` uses `ChangeNotifierProvider` from `flutter_riverpod/legacy.dart` (Riverpod 3.x removed the top-level export; must import `legacy.dart` explicitly).
 
-## Database schema (schema version 5)
+## Database schema (schema version 6)
 
 ### Table: `wallets`
 
@@ -52,8 +52,11 @@ All providers are declared in `lib/providers.dart` and overridden in `main()` wi
 | `initial_balance` | INT | VND, whole number |
 | `type` | TEXT | `'cash'` or `'bank'` |
 | `package_name` | TEXT? | Android package name of linked bank app (ADR-0014) |
+| `sort_order` | INT | user-defined display order; default 0 |
 
 Partial unique index on `package_name WHERE package_name IS NOT NULL` — allows multiple wallets with `NULL` but enforces uniqueness among non-null values.
+
+`sort_order` added in schema v6 (Issue #4). The v6 migration seeds initial values alphabetically using a subquery. New wallets are appended at the bottom via `sort_order = (SELECT COUNT(*) FROM wallets)` in raw SQL (bypasses the Drift ORM before build_runner regenerates the column accessor). `watchWallets()` orders by `sort_order ASC, name ASC`.
 
 ### Table: `txns`
 
@@ -231,6 +234,19 @@ Routes permission requests by class:
 
 `HomePage` is the root scaffold. It uses a `NavigationBar` with 4 destinations. The Giao dịch tab icon shows a `Badge` when `pendingCaptureCount > 0`.
 
+Tab switching: `GestureDetector` wraps the `IndexedStack` body with `onHorizontalDragEnd`. Swipe left (velocity < −300) advances one tab; swipe right (velocity > 300) goes back one tab. `HitTestBehavior.opaque` ensures the gesture captures swipes over any child widget that doesn't handle them itself.
+
 Sub-screens are pushed with `Navigator.of(context).push(MaterialPageRoute(...))`. There is no named-route graph beyond `/` and `/quick-add`.
 
 `navigatorKey` in `main.dart` is a global `GlobalKey<NavigatorState>` used by `openQuickAdd()` to push `QuickAddPage` from outside the widget tree (notification action button tap).
+
+### Sub-screens
+
+| Screen | Entry | File |
+|--------|-------|------|
+| `QuickAddPage` | FAB, tile tap, notification, action "Sửa" | `lib/ui/quick_add_page.dart` |
+| `WalletEditPage` | wallet tile tap | `lib/ui/wallet_edit_page.dart` |
+| `CapturesPage` | captures banner tap | `lib/ui/captures_page.dart` |
+| `CaptureConfirmPage` | capture tile tap | `lib/ui/capture_confirm_page.dart` |
+| `CategoriesPage` | Settings → Quản lý danh mục | `lib/ui/categories_page.dart` |
+| `ThemeCustomizationPage` | Settings → Tuỳ chỉnh giao diện | `lib/ui/theme_customization_page.dart` |

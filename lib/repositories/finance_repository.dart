@@ -124,15 +124,34 @@ class FinanceRepository {
     String? packageName,
   }) async {
     final id = _uuid.v4();
-    await db.into(db.wallets).insert(WalletsCompanion.insert(
-          id: id,
-          name: name,
-          initialBalance: Value(initialBalance),
-          type: Value(type),
-          packageName: Value(packageName),
-        ));
+    // Raw SQL sets sort_order = current count so the new wallet appends at bottom.
+    // WalletsCompanion doesn't include sortOrder until build_runner regenerates.
+    await db.customStatement(
+      'INSERT INTO wallets (id, name, initial_balance, type, package_name, sort_order) '
+      'VALUES (?, ?, ?, ?, ?, (SELECT COUNT(*) FROM wallets))',
+      [id, name, initialBalance, type, packageName],
+    );
     return id;
   }
+
+  Future<void> updateWallet({
+    required String id,
+    required String name,
+    required int initialBalance,
+    required String type,
+    required Value<String?> packageName,
+  }) =>
+      (db.update(db.wallets)..where((w) => w.id.equals(id))).write(
+        WalletsCompanion(
+          name: Value(name),
+          initialBalance: Value(initialBalance),
+          type: Value(type),
+          packageName: packageName,
+        ),
+      );
+
+  Future<void> updateWalletsOrder(List<String> ids) =>
+      db.updateWalletsOrder(ids);
 
   /// Atomically clears [packageName] from whichever wallet currently holds it
   /// and assigns it to [newWalletId]. Safe to call when no wallet currently
@@ -167,6 +186,7 @@ class FinanceRepository {
     required String category,
     String? description,
     DateTime? timestamp,
+    bool starred = false,
   }) async {
     await db.transaction(() async {
       await _assertSufficient(walletId, amount);
@@ -180,6 +200,7 @@ class FinanceRepository {
             category: Value(category),
             timestamp: timestamp ?? now,
             createdAt: now,
+            starred: Value(starred),
           ));
     });
   }
@@ -190,6 +211,7 @@ class FinanceRepository {
     required String category,
     String? description,
     DateTime? timestamp,
+    bool starred = false,
   }) async {
     final now = DateTime.now();
     await db.into(db.txns).insert(TxnsCompanion.insert(
@@ -201,6 +223,7 @@ class FinanceRepository {
           category: Value(category),
           timestamp: timestamp ?? now,
           createdAt: now,
+          starred: Value(starred),
         ));
   }
 

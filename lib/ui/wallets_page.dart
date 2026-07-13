@@ -7,21 +7,7 @@ import '../models/domain.dart';
 import '../providers.dart';
 import '../repositories/finance_repository.dart';
 import '../services/bank/bank_notification_parser.dart';
-
-// Curated bank options for the link picker (ADR-0014).
-const _kBankOptions = [
-  (label: 'OCB', pkg: BankPackages.ocb),
-  (label: 'MB', pkg: BankPackages.mb),
-  (label: 'Techcombank', pkg: BankPackages.techcombank),
-];
-
-String? _bankLabel(String? pkg) {
-  if (pkg == null) return null;
-  for (final b in _kBankOptions) {
-    if (b.pkg == pkg) return b.label;
-  }
-  return pkg;
-}
+import 'wallet_edit_page.dart';
 
 class WalletsPage extends ConsumerWidget {
   const WalletsPage({super.key});
@@ -48,37 +34,56 @@ class WalletsPage extends ConsumerWidget {
                 Card(
                   child: ListTile(
                     title: const Text('Tổng số dư'),
-                    trailing: Text(formatVnd(total),
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    trailing: Text(
+                      formatVnd(total),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (final w in wallets)
-                  Card(
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        child: Icon(w.type == WalletKinds.bank
-                            ? Icons.account_balance
-                            : Icons.payments),
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  itemCount: wallets.length,
+                  itemBuilder: (context, i) {
+                    final w = wallets[i];
+                    return Card(
+                      key: ValueKey(w.id),
+                      child: ListTile(
+                        leading: ReorderableDragStartListener(
+                          index: i,
+                          child: const Icon(Icons.drag_handle),
+                        ),
+                        title: Text(w.name),
+                        subtitle: Text([
+                          WalletKinds.label(w.type),
+                          if (bankLabel(w.packageName) != null)
+                            bankLabel(w.packageName)!,
+                        ].join(' · ')),
+                        trailing: Text(
+                          formatVnd(balances[w.id] ?? 0),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => WalletEditPage(wallet: w),
+                          ),
+                        ),
                       ),
-                      title: Text(w.name),
-                      subtitle: Text([
-                        WalletKinds.label(w.type),
-                        if (_bankLabel(w.packageName) != null)
-                          _bankLabel(w.packageName)!,
-                      ].join(' · ')),
-                      trailing: Text(
-                        formatVnd(balances[w.id] ?? 0),
-                        style:
-                            const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      onLongPress: () =>
-                          _walletActionSheet(context, w, repo),
-                    ),
-                  ),
+                    );
+                  },
+                  onReorder: (oldIndex, newIndex) {
+                    if (newIndex > oldIndex) newIndex--;
+                    final reordered = [...wallets];
+                    reordered.insert(newIndex, reordered.removeAt(oldIndex));
+                    repo.updateWalletsOrder(
+                        reordered.map((w) => w.id).toList());
+                  },
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () => _addWalletDialog(context, repo),
@@ -92,137 +97,6 @@ class WalletsPage extends ConsumerWidget {
         );
       },
     );
-  }
-
-  Future<void> _walletActionSheet(
-      BuildContext context, Wallet w, FinanceRepository repo) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.link),
-              title: const Text('Sửa liên kết ngân hàng'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _editBankLinkDialog(context, w, repo);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.delete_outline,
-                  color: Theme.of(context).colorScheme.error),
-              title: Text('Xoá ví',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _confirmDelete(context, w, repo);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _editBankLinkDialog(
-      BuildContext context, Wallet w, FinanceRepository repo) async {
-    String? selectedPkg = w.packageName;
-
-    await showDialog<void>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: const Text('Liên kết ngân hàng'),
-          content: DropdownButtonFormField<String?>(
-            initialValue: selectedPkg,
-            decoration:
-                const InputDecoration(labelText: 'Ngân hàng'),
-            items: [
-              const DropdownMenuItem<String?>(
-                  value: null, child: Text('— Không liên kết —')),
-              for (final b in _kBankOptions)
-                DropdownMenuItem<String?>(
-                    value: b.pkg, child: Text(b.label)),
-            ],
-            onChanged: (v) => setState(() => selectedPkg = v),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Huỷ')),
-            FilledButton(
-              onPressed: () async {
-                final newPkg = selectedPkg;
-                if (newPkg == w.packageName) {
-                  Navigator.pop(context);
-                  return;
-                }
-                if (newPkg != null) {
-                  // Uniqueness check — exclude the wallet being edited.
-                  final existing =
-                      await repo.walletByPackageName(newPkg);
-                  if (existing != null && existing.id != w.id) {
-                    if (!context.mounted) return;
-                    final move = await showDialog<bool>(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title:
-                            const Text('Ngân hàng đã được liên kết'),
-                        content: Text(
-                          'Ngân hàng này đang liên kết với ví '
-                          '"${existing.name}". Chuyển sang ví này?',
-                        ),
-                        actions: [
-                          TextButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, false),
-                              child: const Text('Huỷ')),
-                          FilledButton(
-                              onPressed: () =>
-                                  Navigator.pop(context, true),
-                              child: const Text('Chuyển')),
-                        ],
-                      ),
-                    );
-                    if (move != true) return;
-                    await repo.reassignWalletBankLink(newPkg, w.id);
-                    if (context.mounted) Navigator.pop(context);
-                    return;
-                  }
-                }
-                await repo.updateWalletPackageName(w.id, newPkg);
-                if (context.mounted) Navigator.pop(context);
-              },
-              child: const Text('Lưu'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmDelete(
-      BuildContext context, Wallet w, FinanceRepository repo) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Xoá ví "${w.name}"?'),
-        content: const Text(
-            'Giao dịch liên quan vẫn được giữ lại nhưng sẽ không còn ví tham chiếu.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Xoá')),
-        ],
-      ),
-    );
-    if (ok == true) await repo.deleteWallet(w.id);
   }
 }
 
@@ -291,12 +165,12 @@ Future<void> _addWalletDialog(
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
               initialValue: linkedPkg,
-              decoration: const InputDecoration(
-                  labelText: 'Ngân hàng liên kết'),
+              decoration:
+                  const InputDecoration(labelText: 'Ngân hàng liên kết'),
               items: [
                 const DropdownMenuItem<String?>(
                     value: null, child: Text('— Không —')),
-                for (final b in _kBankOptions)
+                for (final b in kBankPickerOptions)
                   DropdownMenuItem<String?>(
                       value: b.pkg, child: Text(b.label)),
               ],
@@ -315,16 +189,13 @@ Future<void> _addWalletDialog(
               final pkg = linkedPkg;
 
               if (pkg != null) {
-                // Uniqueness check before inserting.
-                final existing =
-                    await repository.walletByPackageName(pkg);
+                final existing = await repository.walletByPackageName(pkg);
                 if (existing != null) {
                   if (!context.mounted) return;
                   final move = await showDialog<bool>(
                     context: context,
                     builder: (_) => AlertDialog(
-                      title:
-                          const Text('Ngân hàng đã được liên kết'),
+                      title: const Text('Ngân hàng đã được liên kết'),
                       content: Text(
                         'Ngân hàng này đang liên kết với ví '
                         '"${existing.name}". Chuyển sang ví mới?',
@@ -342,7 +213,6 @@ Future<void> _addWalletDialog(
                     ),
                   );
                   if (move != true) return;
-                  // Create wallet without pkg first, then move link atomically.
                   final newId = await repository.addWallet(
                     name: name,
                     initialBalance: parseAmount(balCtrl.text),

@@ -4,18 +4,18 @@ File: `lib/ui/transactions_page.dart`
 
 ## Overview
 
-The Giao dịch tab shows all transactions (newest first), with a filter for starred transactions and a banner linking to the bank-capture inbox when pending captures exist. Each transaction tile supports tap-to-edit (non-imported), long-press action sheet, and swipe-to-delete.
+The Giao dịch tab shows transactions with a multi-filter bar, a bank-capture banner, and a list. Each tile supports tap-to-edit (non-imported), long-press action sheet, and delete-via-action-sheet. Swipe-to-delete was removed — delete is now action-sheet only.
 
 ## Widget tree
 
 ```
 TransactionsPage (ConsumerStatefulWidget)
   └─ _TransactionsPageState
-     └─ Column
-        ├─ Filter bar (Tất cả / Có sao ChoiceChips)
-        ├─ StreamBuilder<int>     (repo.pendingCaptureCount()) — captures banner
-        └─ Expanded
-           └─ StreamBuilder<List<AppCategory>>   (repo.watchAllCategories())
+     └─ StreamBuilder<List<AppCategory>>  (repo.watchAllCategories())
+        └─ Column
+           ├─ _buildFilterBar (SingleChildScrollView of chips)
+           ├─ StreamBuilder<int>   (repo.pendingCaptureCount()) — captures banner
+           └─ Expanded
               └─ StreamBuilder<List<Wallet>>       (repo.watchWallets())
                  └─ FutureBuilder<Map<String,int>> (repo.categoryThresholds('spending'))
                     └─ StreamBuilder<List<Txn>>    (repo.watchTxns())
@@ -23,17 +23,50 @@ TransactionsPage (ConsumerStatefulWidget)
                           └─ _TxnTile × N
 ```
 
+`watchAllCategories()` is the **outermost** stream so the filter bar and the tile label map share the same snapshot without redundant subscriptions.
+
 ## State
 
-`_starredOnly: bool` — toggled by the filter chips; causes a `setState` rebuild.
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `_starredOnly` | `bool` | `false` | show only manually or auto-starred txns |
+| `_typeFilter` | `String?` | `null` | filter by `TxTypes.spending` / `.earning`; null = all |
+| `_categoryFilter` | `String?` | `null` | filter to one category ID; null = all |
+| `_sortByAmount` | `bool` | `false` | sort by amount descending instead of timestamp descending |
 
-## Filter bar
+`_categoryFilter` resets to null whenever `_typeFilter` changes.
 
-Two `ChoiceChip`s:
-- "Tất cả" — selected when `!_starredOnly`
-- "Có sao" (with star icon) — selected when `_starredOnly`
+## Filter bar (`_buildFilterBar`)
 
-Both call `setState(() => _starredOnly = ...)`.
+Horizontal `SingleChildScrollView` containing a `Row` of chips:
+
+| Chip | Type | Behaviour |
+|------|------|-----------|
+| Tất cả | `ChoiceChip` | clears `_typeFilter` and `_categoryFilter` |
+| Chi tiêu | `ChoiceChip` | sets `_typeFilter = TxTypes.spending`, clears `_categoryFilter` |
+| Thu nhập | `ChoiceChip` | sets `_typeFilter = TxTypes.earning`, clears `_categoryFilter` |
+| Có sao ⭐ | `FilterChip` | toggles `_starredOnly` |
+| Danh mục | `FilterChip` | shown only when `_typeFilter != null`; taps to `_pickCategory()` |
+| Số tiền ↕ | `FilterChip` | toggles `_sortByAmount` |
+
+The "Danh mục" chip label shows the current category name when `_categoryFilter != null`, otherwise "Danh mục".
+
+### `_pickCategory(context, cats)`
+
+`showDialog<List<String?>>` with a `SimpleDialog`. Returns a one-element list so that `null` return (dialog dismissed) is distinguishable from `[null]` (user picked "Tất cả") and `[id]` (user picked a category). Sets `_categoryFilter = picked[0]` on result.
+
+## Filter and sort application
+
+Applied after all streams resolve, just before building `ListView`:
+
+```dart
+if (_starredOnly)       txns = txns.where((t) => t.starred || isAutoStarred(...)).toList();
+if (_typeFilter != null) txns = txns.where((t) => t.type == _typeFilter).toList();
+if (_categoryFilter != null) txns = txns.where((t) => t.category == _categoryFilter).toList();
+if (_sortByAmount)       txns = [...txns]..sort((a, b) => b.amount.compareTo(a.amount));
+```
+
+`watchTxns()` always returns transactions newest-first; sort-by-amount creates a fresh sorted copy without mutating the snapshot.
 
 ## Captures banner
 
@@ -41,32 +74,17 @@ Both call `setState(() => _starredOnly = ...)`.
 StreamBuilder<int>(
   stream: repo.pendingCaptureCount(),
   builder: (context, snap) {
-    final count = snap.data ?? 0;
     if (count == 0) return const SizedBox.shrink();
-    return Card(
-      color: scheme.primaryContainer,
-      child: ListTile(
-        leading: Badge(label: Text('$count'), child: Icon(Icons.notifications_outlined)),
-        title: Text('$count thông báo ngân hàng chờ xác nhận'),
-        trailing: Icon(Icons.chevron_right),
-        onTap: () => Navigator.push(_, MaterialPageRoute(_ => const CapturesPage())),
-      ),
-    );
+    return Card(color: scheme.primaryContainer, child: ListTile(...));
   },
 )
 ```
 
-Reactive — disappears automatically when `pendingCaptureCount` drops to 0 after all captures are confirmed or dismissed.
-
-## Transaction list
-
-Four nested `StreamBuilder`/`FutureBuilder`s (category labels, wallet name map, category thresholds, transaction list) build a snapshot each, then pass them down to each tile. This nesting is verbose but keeps data fresh reactively.
-
-When `_starredOnly` is true, the transactions list is filtered to those where `txn.starred || isAutoStarred(txn, thresholds, enabled: settings.autostarEnabled)`.
+Reactive — disappears automatically when `pendingCaptureCount` drops to 0.
 
 ## `_TxnTile` (ConsumerWidget)
 
-### Data it receives
+### Data received
 
 | Parameter | Type | Purpose |
 |-----------|------|---------|
@@ -81,11 +99,7 @@ When `_starredOnly` is true, the transactions list is filtered to those where `t
 - Non-transfer with description: the description string
 - Non-transfer without description: the category label
 
-`resolveWallet(id, snapshot)`: tries live name first; if the wallet was deleted (returns "(ví khác)"), falls back to the snapshot name stored in `walletFromName`/`walletToName` at import time.
-
-### Subtitle
-
-`"TxType · Category · WalletName · DateTime"` joined with ` · `. Transfers omit category and wallet fields (both sides are already in the title).
+`resolveWallet(id, snapshot)`: tries live name first; if the wallet was deleted (returns "(ví khác)"), falls back to the snapshot name stored in `walletFromName`/`walletToName`.
 
 ### Amount display
 
@@ -93,47 +107,45 @@ When `_starredOnly` is true, the transactions list is filtered to those where `t
 - Spending: `−amount` in error color
 - Earning: `+amount` in green
 
-Respects `settings.currencySymbol` and `settings.currencySuffix`.
-
 ### Star display
 
 `showStar = txn.starred || autoStar`. If `txn.starred`, shows filled star icon; if only `autoStar`, shows outlined star. Both are amber.
 
-### `Dismissible`
+`autoStar` is computed in `build()` and passed into `_showActionSheet(context, repo, showStar: showStar)` so the action sheet reflects the same combined state.
 
-Direction: `endToStart` (swipe left). Shows a red delete background. On dismiss:
-1. `showDialog` "Xoá giao dịch?" — must confirm before the row is removed.
-2. On confirm: `repo.deleteTxn(txn.id)`.
+### No `Dismissible`
 
-`confirmDismiss` returns `false` if the user cancels, which aborts the dismiss animation and restores the tile.
+Swipe-to-delete was removed. Delete is now only accessible via the long-press action sheet. This prevents accidental deletion when the user is trying to scroll or swipe between tabs.
 
 ### `onTap`
 
-Opens `QuickAddPage(editing: txn)` — the shared add/edit form in edit mode. Disabled for imported transactions (`onTap: txn.imported ? null : ...`).
+Opens `QuickAddPage(editing: txn)`. Disabled for imported transactions (`onTap: txn.imported ? null : ...`).
 
-### `_showActionSheet(context, repo)`
+### `_showActionSheet(context, repo, {required bool showStar})`
 
 `showModalBottomSheet` with:
 - **Sửa** (non-imported only) → pushes `QuickAddPage(editing: txn)`
-- **Đánh dấu sao / Bỏ đánh dấu sao** (non-imported only) → `repo.toggleStar(txn)`
+- **Đánh dấu sao / Bỏ đánh dấu sao** (non-imported only):
+  - Icon and label reflect `showStar` (= `txn.starred || autoStar`), not just `txn.starred`.
+  - Toggle action: `repo.toggleStar(txn)` — only flips the manual `starred` flag, auto-star is computed separately.
 - **Xoá** → AlertDialog → `repo.deleteTxn(txn.id)`
 
-"Sửa" and star are hidden for imported transactions.
+**Why `showStar` not `txn.starred`:** The action sheet previously showed "Đánh dấu sao" even when a transaction was already auto-starred, which was visually inconsistent. Passing `showStar` unifies the icon/label to match the tile display.
 
 ### `_catLabel(String? id) → String`
 
-Resolves `id` from the `catLabels` map received from the parent. Falls back to `Categories.label(id)` from the static fallback map if the DB category isn't in the snapshot (e.g., archived but still referenced by old transactions).
+Resolves from `catLabels` map. Falls back to `Categories.label(id)` for archived categories still referenced by old transactions.
 
 ## `_Chip` widget
 
-Tiny label chip used to show "đã nhập" on imported transactions. Styled with `surfaceContainerHighest` background and `labelSmall` text.
+Tiny label chip for "đã nhập" badge on imported transactions. `surfaceContainerHighest` background, `labelSmall` text.
 
 ## Key repository calls
 
 | Call | Effect |
 |------|--------|
 | `repo.pendingCaptureCount()` | stream of pending capture count |
-| `repo.watchAllCategories()` | stream of all categories (including archived) for label lookup |
+| `repo.watchAllCategories()` | stream of all categories (including archived) |
 | `repo.watchWallets()` | stream of wallets for name map |
 | `repo.categoryThresholds('spending')` | future of `{categoryId → VND threshold}` |
 | `repo.watchTxns()` | stream of all transactions newest-first |

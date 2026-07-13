@@ -29,6 +29,22 @@ class BankPackages {
   static const List<String> all = [ocb, mb, techcombank];
 }
 
+/// Curated list of supported bank options for UI bank-link pickers.
+const kBankPickerOptions = [
+  (label: 'OCB', pkg: BankPackages.ocb),
+  (label: 'MB', pkg: BankPackages.mb),
+  (label: 'Techcombank', pkg: BankPackages.techcombank),
+];
+
+/// Returns the human-readable label for [pkg], or null if pkg is null.
+String? bankLabel(String? pkg) {
+  if (pkg == null) return null;
+  for (final b in kBankPickerOptions) {
+    if (b.pkg == pkg) return b.label;
+  }
+  return pkg;
+}
+
 /// Returns the correct [BankNotificationParser] for a given package name,
 /// or null if the package is not a supported bank.
 class BankParserRegistry {

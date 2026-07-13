@@ -27,6 +27,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
   String? _walletId;
   String? _toWalletId;
   late DateTime _timestamp;
+  bool _starred = false;
   bool _categoryTouched = false;
   bool _saving = false;
 
@@ -45,6 +46,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
       _walletId = e.walletId;
       _toWalletId = e.walletToId;
       _timestamp = e.timestamp;
+      _starred = e.starred;
       _categoryTouched = true;
     } else {
       _type = widget.initialType ?? TxTypes.spending;
@@ -125,6 +127,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
           walletToId: Value<String?>(_isTransfer ? _toWalletId : null),
           category: Value<String?>(_isTransfer ? null : _category),
           timestamp: _timestamp,
+          starred: _starred,
         );
         await repo.updateTxn(updated);
       } else {
@@ -134,12 +137,14 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
               amount: amount, walletId: _walletId!,
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
+              starred: _starred,
             );
           case TxTypes.earning:
             await repo.addEarning(
               amount: amount, walletId: _walletId!,
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
+              starred: _starred,
             );
           case TxTypes.transfer:
             await repo.addTransfer(
@@ -264,6 +269,16 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                       trailing: TextButton(onPressed: _pickTime, child: const Text('Sửa')),
                     ),
                   ),
+                  if (!_isTransfer)
+                    SwitchListTile(
+                      secondary: Icon(
+                        _starred ? Icons.star : Icons.star_border,
+                        color: Colors.amber.shade600,
+                      ),
+                      title: const Text('Đánh dấu sao'),
+                      value: _starred,
+                      onChanged: (v) => setState(() => _starred = v),
+                    ),
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: _saving ? null : _save,

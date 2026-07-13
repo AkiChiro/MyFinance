@@ -70,7 +70,18 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(_titles[_index])),
-      body: IndexedStack(index: _index, children: _pages),
+      body: GestureDetector(
+        onHorizontalDragEnd: (details) {
+          final v = details.primaryVelocity ?? 0;
+          if (v < -300 && _index < _pages.length - 1) {
+            setState(() => _index++);
+          } else if (v > 300 && _index > 0) {
+            setState(() => _index--);
+          }
+        },
+        behavior: HitTestBehavior.opaque,
+        child: IndexedStack(index: _index, children: _pages),
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openQuickAdd(),
         icon: const Icon(Icons.add),

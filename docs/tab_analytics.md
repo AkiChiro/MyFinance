@@ -63,9 +63,20 @@ Two `const` maps keyed by category ID:
 
 ## Pie charts
 
-Built with `fl_chart`'s `PieChart`. Each sector corresponds to one category entry in `stats.spendByCat` or `stats.earnByCat`. The legend is a `Wrap` of color boxes + labels.
+Built with `fl_chart`'s `PieChart`. Each sector corresponds to one category entry in `stats.spendByCat` or `stats.earnByCat`. The legend is a `Column` of color-dot + label + amount rows on the right side of the chart.
 
 Sections with zero total are not rendered (excluded from the map by the SQL `GROUP BY` result).
+
+### Legend rows
+
+Each row in the right-side legend shows:
+- A 10×10 colored circle (matching the pie sector)
+- The category label (expanded, ellipsized)
+- The VND amount (`formatVnd(e.value)`) — **not** a percentage
+
+Row padding: `EdgeInsets.symmetric(vertical: 6)` — increased from 3 to 6 for readability.
+
+Pie sector labels (inside the chart itself) still show `'${pct.toStringAsFixed(1)}%'` so the proportions are visible at a glance in the chart.
 
 ## Month navigation
 
