@@ -12,18 +12,23 @@ The Ví tab shows all wallets in user-defined order with their derived balances.
 WalletsPage (ConsumerWidget)
   └─ StreamBuilder<List<Wallet>>       (repo.watchWallets())
      └─ StreamBuilder<Map<String,int>>  (repo.watchWalletBalances())
-        ├─ _Empty                      (if no wallets)
-        └─ ListView
-           ├─ Card (total balance row)
-           ├─ ReorderableListView.builder (wallet cards × N)
-           │   └─ Card > ListTile
-           │       ├─ leading: ReorderableDragStartListener (drag handle icon)
-           │       ├─ title: wallet name
-           │       ├─ subtitle: type · bank label (if linked)
-           │       ├─ trailing: formatted VND balance
-           │       └─ onTap → push WalletEditPage
-           └─ OutlinedButton "Thêm ví"
+        └─ AnimatedSwitcher (200ms cross-fade, keyed 'empty'/'list')
+           ├─ _Empty                     (if no wallets — fade/scale-in via TweenAnimationBuilder)
+           └─ _WalletsList
+              └─ ListView
+                 ├─ HeroBalanceCard        (gradient + count-up total — see architecture.md "Ví tab dashboard")
+                 ├─ RecentActivityPreview  (sparkline + last 5 txns, hides if none — see architecture.md)
+                 ├─ ReorderableListView.builder (wallet cards × N)
+                 │   └─ Card > ListTile
+                 │       ├─ leading: Row [ReorderableDragStartListener (drag handle) + CircleAvatar(AppIcon('wallet_cash'|'wallet_bank'))]
+                 │       ├─ title: wallet name
+                 │       ├─ subtitle: type · bank label (if linked)
+                 │       ├─ trailing: formatted VND balance
+                 │       └─ onTap → push WalletEditPage
+                 └─ OutlinedButton "Thêm ví"
 ```
+
+`_WalletsList` and `_Empty` are both given distinct `ValueKey`s so `AnimatedSwitcher` detects the swap and cross-fades instead of a hard cut. See `docs/architecture.md`'s "Ví tab dashboard" section for the hero card / recent-activity preview / sparkline design.
 
 ## Data sources
 
@@ -151,9 +156,20 @@ WalletEditPage (ConsumerStatefulWidget)
 
 Transactions linked to the deleted wallet are retained (the wallet reference becomes stale).
 
-### `initialBalance` note
+### `initialBalance` reset behaviour
 
-Changing `initialBalance` directly shifts all derived balances. There is no archiving or transaction split on wallet parameter changes — this is a conscious simplicity tradeoff (the user requested archiving as optional; it was not implemented).
+When the user saves a new `initialBalance` value, `WalletEditPage` detects `balanceChanged = newBalance != wallet.initialBalance` and calls `updateWallet(resetTransactions: balanceChanged)`. This runs inside a single DB transaction:
+
+1. The wallet row is updated with the new `initialBalance`.
+2. `UPDATE wallets SET balance_cutoff_at = ? WHERE id = ?` — sets the cutoff to Unix-now for **this wallet only**.
+
+The balance SQL applies `AND timestamp >= COALESCE(balance_cutoff_at, 0)` per-wallet via a JOIN, so only transactions created after the reset accumulate on top of `initialBalance`. After the reset the wallet balance equals the new `initialBalance`.
+
+**No transfer contamination (Option C — per-wallet cutoff)**: the old approach set `affects_balance=0` on all transfer rows where this wallet appeared, inadvertently removing the transfer from wallet B's balance too. The `balance_cutoff_at` approach is per-wallet — resetting wallet A does not affect wallet B's view of shared transfer rows.
+
+**Analytics unaffected**: the `affects_balance` column no longer gates analytics queries. Old transactions remain in totals and category breakdowns regardless of the reset.
+
+The helper text on the balance field warns the user: "Thay đổi giá trị này sẽ đặt lại số dư — các giao dịch cũ sẽ không còn tính vào số dư nữa."
 
 ---
 

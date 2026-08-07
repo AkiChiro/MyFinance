@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
 import '../repositories/finance_repository.dart';
@@ -37,14 +38,15 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Danh mục'),
+        title: Text(l10n.categoriesTitle),
         bottom: TabBar(
           controller: _tab,
-          tabs: const [
-            Tab(text: 'Chi tiêu'),
-            Tab(text: 'Thu nhập'),
+          tabs: [
+            Tab(text: l10n.txTypeSpending),
+            Tab(text: l10n.txTypeEarning),
           ],
         ),
       ),
@@ -58,13 +60,16 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAddDialog(context, _currentKind),
         icon: const Icon(Icons.add),
-        label: Text(_tab.index == 0 ? 'Thêm chi tiêu' : 'Thêm thu nhập'),
+        label: Text(_tab.index == 0
+            ? l10n.categoriesAddSpending
+            : l10n.categoriesAddEarning),
       ),
     );
   }
 
   Future<void> _showAddDialog(BuildContext context, String kind) async {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     final labelCtrl = TextEditingController();
     final threshCtrl = TextEditingController();
 
@@ -72,14 +77,14 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(kind == TxTypes.spending
-            ? 'Thêm danh mục chi tiêu'
-            : 'Thêm danh mục thu nhập'),
+            ? l10n.categoriesAddSpendingTitle
+            : l10n.categoriesAddEarningTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: labelCtrl,
-              decoration: const InputDecoration(labelText: 'Tên danh mục'),
+              decoration: InputDecoration(labelText: l10n.categoriesNameField),
               autofocus: true,
             ),
             if (kind == TxTypes.spending) ...[
@@ -88,8 +93,8 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 controller: threshCtrl,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Ngưỡng tự động sao (₫, tùy chọn)',
+                decoration: InputDecoration(
+                  labelText: l10n.categoriesThresholdFieldOptional,
                   suffixText: '₫',
                 ),
               ),
@@ -98,7 +103,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Huỷ')),
+              onPressed: () => Navigator.pop(ctx), child: Text(l10n.commonCancel)),
           FilledButton(
             onPressed: () async {
               final label = labelCtrl.text.trim();
@@ -108,7 +113,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                   label: label, kind: kind, threshold: threshold);
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('Thêm'),
+            child: Text(l10n.commonAdd),
           ),
         ],
       ),
@@ -127,6 +132,7 @@ class _CategoryList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     return StreamBuilder<List<AppCategory>>(
       stream: repo.watchActiveCategories(kind),
       builder: (context, snap) {
@@ -135,8 +141,8 @@ class _CategoryList extends ConsumerWidget {
           return Center(
             child: Text(
               kind == TxTypes.spending
-                  ? 'Chưa có danh mục chi tiêu.'
-                  : 'Chưa có danh mục thu nhập.',
+                  ? l10n.categoriesEmptySpending
+                  : l10n.categoriesEmptyEarning,
             ),
           );
         }
@@ -148,8 +154,8 @@ class _CategoryList extends ConsumerWidget {
                 child: ListTile(
                   title: Text(cat.label),
                   subtitle: cat.threshold > 0
-                      ? Text('Tự động sao > ${formatVnd(cat.threshold)}')
-                      : const Text('Không tự động sao'),
+                      ? Text(l10n.categoriesThresholdSubtitle(formatVnd(cat.threshold)))
+                      : Text(l10n.categoriesNoThreshold),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -159,7 +165,7 @@ class _CategoryList extends ConsumerWidget {
                       ),
                       IconButton(
                         icon: const Icon(Icons.archive_outlined),
-                        tooltip: 'Lưu trữ danh mục',
+                        tooltip: l10n.categoriesArchiveTooltip,
                         onPressed: () => _confirmArchive(context, cat, repo),
                       ),
                     ],
@@ -174,6 +180,7 @@ class _CategoryList extends ConsumerWidget {
 
   Future<void> _showEditDialog(
       BuildContext context, AppCategory cat, FinanceRepository repo) async {
+    final l10n = AppLocalizations.of(context)!;
     final labelCtrl = TextEditingController(text: cat.label);
     final threshCtrl = TextEditingController(
         text: cat.threshold > 0 ? cat.threshold.toString() : '');
@@ -181,13 +188,13 @@ class _CategoryList extends ConsumerWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sửa danh mục'),
+        title: Text(l10n.categoriesEditTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: labelCtrl,
-              decoration: const InputDecoration(labelText: 'Tên danh mục'),
+              decoration: InputDecoration(labelText: l10n.categoriesNameField),
               autofocus: true,
             ),
             if (cat.kind == TxTypes.spending) ...[
@@ -196,8 +203,8 @@ class _CategoryList extends ConsumerWidget {
                 controller: threshCtrl,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Ngưỡng tự động sao (₫, để trống = tắt)',
+                decoration: InputDecoration(
+                  labelText: l10n.categoriesThresholdFieldEdit,
                   suffixText: '₫',
                 ),
               ),
@@ -207,10 +214,10 @@ class _CategoryList extends ConsumerWidget {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Lưu')),
+              child: Text(l10n.commonSave)),
         ],
       ),
     );
@@ -237,19 +244,19 @@ class _CategoryList extends ConsumerWidget {
 
   Future<void> _confirmArchive(
       BuildContext context, AppCategory cat, FinanceRepository repo) async {
+    final l10n = AppLocalizations.of(context)!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Lưu trữ "${cat.label}"?'),
-        content: const Text(
-            'Danh mục sẽ ẩn khỏi lựa chọn nhưng giao dịch cũ vẫn giữ nguyên.'),
+        title: Text(l10n.categoriesArchiveConfirmTitle(cat.label)),
+        content: Text(l10n.categoriesArchiveConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Lưu trữ')),
+              child: Text(l10n.categoriesArchiveConfirmAction)),
         ],
       ),
     );

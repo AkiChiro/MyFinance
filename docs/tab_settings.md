@@ -15,19 +15,38 @@ SettingsPage (ConsumerStatefulWidget)
      └─ ListView
         ├─ "Thông báo" section
         │   └─ SwitchListTile (persistent notification enable/disable)
-        ├─ "Dữ liệu" section
-        │   ├─ "Xuất CSV" tile
-        │   └─ "Nhập / Hợp nhất CSV" tile
+        ├─ "Ngôn ngữ" section
+        │   └─ SegmentedButton<String> (Tiếng Việt / English → settings.locale)
+        ├─ "Đơn vị tiền tệ" section
+        │   └─ "Ký hiệu tiền tệ" tile → symbol edit dialog
+        ├─ "Tự động đánh dấu sao" section
+        │   └─ SwitchListTile (autostar toggle)
         ├─ "Danh mục" section
         │   └─ "Quản lý danh mục" tile → CategoriesPage
         ├─ "Giao diện" section
-        │   └─ "Tuỳ chỉnh giao diện" tile → ThemeCustomizationPage
-        ├─ "Tự động gắn sao" section
-        │   └─ SwitchListTile (autostar toggle)
+        │   ├─ "Chế độ màu" SegmentedButton (system/light/dark)
+        │   └─ "Tuỳ chỉnh nâng cao" tile → ThemeCustomizationPage
+        ├─ "Sao lưu dữ liệu (CSV)" section
+        │   ├─ "Xuất CSV" tile
+        │   ├─ "Nhập CSV (gộp)" tile
+        │   └─ "Nhập CSV (thay thế toàn bộ)" tile
+        ├─ "Danh mục gợi ý" section
+        │   └─ "Thư viện từ khoá" tile → KeywordEditorPage
+        ├─ "Thông tin" section (about card)
         └─ "Nhà phát triển" section
             ├─ "Cấp quyền nghe thông báo" tile
             └─ "Gói ứng dụng đã thấy" tile
 ```
+
+## Icon customization ("Biểu tượng" section, `ThemeCustomizationPage`)
+
+Below "Ảnh nền", grouped into 5 sub-`Card`s (Điều hướng / Nút thêm nhanh / Loại giao dịch / Đánh dấu sao / Loại ví — `kIconSlotGroups` in `lib/ui/widgets/icon_slots.dart`). Each row: `AppIcon` thumbnail, slot display name, a reset `IconButton` (shown only when a custom image is set) + chevron. Tapping a row opens the file picker (`FilePicker.platform.pickFiles(type: FileType.image)`), copies the result into `.../customization/icons/<slotId>.<ext>`, and calls `settings.setIconPath(slotId, path)`. In-app guidance text above the groups recommends square PNGs, 128×128 minimum / 256×256 recommended. The page's "Đặt lại" action (app bar + confirm dialog) now also clears every icon slot, not just colors/background.
+
+See `docs/architecture.md`'s "Icon customization (`AppIcon`)" section for the full design (11 slots, storage, fallback resolution).
+
+## Language toggle
+
+`SegmentedButton<String>` with two segments (`'vi'` → "Tiếng Việt", `'en'` → "English" — language endonyms, hardcoded rather than translated, so a Vietnamese speaker always sees "Tiếng Việt" regardless of the active locale). `onSelectionChanged` writes `settings.locale`, which `MyFinanceApp` already watches (`locale: Locale(settings.locale)`), so every screen using `AppLocalizations.of(context)!` rebuilds immediately. If the persistent notification is currently enabled, the handler also calls `NotificationService.instance.showPersistentNotification(locale: s.first)` so the tray notification's text updates without waiting for the next toggle/resume. See `docs/architecture.md`'s "Localization (l10n)" section for the full l10n design.
 
 ## `AppSettings` service
 

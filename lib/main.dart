@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'data/database.dart';
+import 'l10n/generated/app_localizations.dart';
 import 'providers.dart';
 import 'repositories/finance_repository.dart';
 import 'services/app_settings.dart';
@@ -22,7 +22,8 @@ Future<void> main() async {
   final suggester = CategorySuggester();
   final settings = await AppSettings.load();
   await suggester.load();
-  await NotificationService.instance.init(enabled: settings.notifEnabled);
+  await NotificationService.instance
+      .init(enabled: settings.notifEnabled, locale: settings.locale);
   final captureService =
       CaptureService(repo: repository, api: LiveCaptureChannelApi());
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver(captureService));
@@ -80,28 +81,41 @@ class MyFinanceApp extends ConsumerWidget {
         hasBgImage ? Colors.transparent : (customBg ?? const Color(0xFFFFFDF5));
     final darkBg = hasBgImage ? Colors.transparent : customBg;
 
-    TextTheme? withFontColor(TextTheme base) => customFont == null
-        ? null
-        : base.apply(bodyColor: customFont, displayColor: customFont);
+    // fontFamily applies unconditionally (Nunito, bundled asset); only the
+    // body/display color override stays conditional on a custom font color.
+    TextTheme withFont(TextTheme base) => base.apply(
+          fontFamily: 'Nunito',
+          bodyColor: customFont,
+          displayColor: customFont,
+        );
+
+    final lightScheme = ColorScheme.fromSeed(seedColor: seed);
+    final darkScheme =
+        ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark);
+
+    CardThemeData cardTheme(ColorScheme scheme) => CardThemeData(
+          elevation: 0,
+          color: scheme.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        );
+    const chipTheme = ChipThemeData(shape: StadiumBorder());
 
     return MaterialApp(
       title: 'MyFinance',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       locale: Locale(settings.locale),
-      supportedLocales: const [Locale('vi'), Locale('en')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
       themeMode: settings.flutterThemeMode,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: seed),
+        colorScheme: lightScheme,
         scaffoldBackgroundColor: lightBg,
-        textTheme: withFontColor(ThemeData().textTheme),
+        textTheme: withFont(ThemeData().textTheme),
         appBarTheme: const AppBarTheme(centerTitle: false),
+        cardTheme: cardTheme(lightScheme),
+        chipTheme: chipTheme,
         inputDecorationTheme: const InputDecorationTheme(
           border: OutlineInputBorder(),
           isDense: true,
@@ -109,12 +123,12 @@ class MyFinanceApp extends ConsumerWidget {
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
-        colorScheme:
-            ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+        colorScheme: darkScheme,
         scaffoldBackgroundColor: darkBg,
-        textTheme: withFontColor(
-            ThemeData(brightness: Brightness.dark).textTheme),
+        textTheme: withFont(ThemeData(brightness: Brightness.dark).textTheme),
         appBarTheme: const AppBarTheme(centerTitle: false),
+        cardTheme: cardTheme(darkScheme),
+        chipTheme: chipTheme,
         inputDecorationTheme: const InputDecorationTheme(
           border: OutlineInputBorder(),
           isDense: true,

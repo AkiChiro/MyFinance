@@ -55,11 +55,11 @@ Replacing the stream is safe because `StreamBuilder` cancels the old subscriptio
 
 ## Category colors
 
-Two `const` maps keyed by category ID:
-- `_spendColors`: `necessities=orange, food=amber, hobbies=purple, others=grey`
-- `_earnColors`: `provided=green, self_earned=blue, others_earn=grey`
+Moved to the shared `lib/ui/category_colors.dart` (warm-redesign change, so `transactions_page.dart`'s `_TxnTile` can use the same palette for its icon color). Two `const` maps keyed by category ID:
+- `spendColors`: `necessities=orange, food=amber, hobbies=purple, others=grey`
+- `earnColors`: `provided=green, self_earned=blue, others_earn=grey`
 
-`_spendColor(cat)` / `_earnColor(cat)`: resolve color, fall back to grey for unknown IDs.
+`spendColor(cat)` / `earnColor(cat)`: resolve color, fall back to grey for unknown IDs (user-created categories).
 
 ## Pie charts
 

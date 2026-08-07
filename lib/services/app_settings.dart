@@ -95,6 +95,17 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── custom icon slots (null = built-in Material icon) ────────────────────────
+  String? iconPath(String slotId) => _prefs.getString('ui.icon.$slotId');
+  void setIconPath(String slotId, String? path) {
+    if (path == null) {
+      _prefs.remove('ui.icon.$slotId');
+    } else {
+      _prefs.setString('ui.icon.$slotId', path);
+    }
+    notifyListeners();
+  }
+
   // ── notification toggle ────────────────────────────────────────────────────
   bool get notifEnabled => _prefs.getBool('notif.enabled') ?? true;
   set notifEnabled(bool v) {

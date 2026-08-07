@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
 import '../repositories/finance_repository.dart';
+import 'widgets/app_icon.dart';
 
 class QuickAddPage extends ConsumerStatefulWidget {
   const QuickAddPage({super.key, this.editing, this.initialType});
@@ -108,15 +110,20 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
 
   Future<void> _save() async {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     final amount = parseAmount(_amount.text);
-    if (amount <= 0) { _snack('Vui lòng nhập số tiền hợp lệ.'); return; }
-    if (_walletId == null) { _snack(_isTransfer ? 'Chọn ví nguồn.' : 'Chọn ví.'); return; }
+    if (amount <= 0) { _snack(l10n.quickAddInvalidAmount); return; }
+    if (_walletId == null) {
+      _snack(_isTransfer ? l10n.quickAddPickSourceWallet : l10n.quickAddPickWallet);
+      return;
+    }
     if (_isTransfer) {
-      if (_toWalletId == null) { _snack('Chọn ví đích.'); return; }
-      if (_toWalletId == _walletId) { _snack('Ví nguồn và ví đích phải khác nhau.'); return; }
+      if (_toWalletId == null) { _snack(l10n.quickAddPickDestWallet); return; }
+      if (_toWalletId == _walletId) { _snack(l10n.quickAddSameWalletError); return; }
     }
 
     setState(() => _saving = true);
+    final autostar = ref.read(settingsProvider).autostarEnabled;
     try {
       if (_isEdit) {
         final updated = widget.editing!.copyWith(
@@ -129,7 +136,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
           timestamp: _timestamp,
           starred: _starred,
         );
-        await repo.updateTxn(updated);
+        await repo.updateTxn(updated, autostarEnabled: autostar);
       } else {
         switch (_type) {
           case TxTypes.spending:
@@ -138,6 +145,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
               starred: _starred,
+              autostarEnabled: autostar,
             );
           case TxTypes.earning:
             await repo.addEarning(
@@ -145,6 +153,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
               category: _category ?? Categories.fallbackFor(_type),
               description: _desc.text.trim(), timestamp: _timestamp,
               starred: _starred,
+              autostarEnabled: autostar,
             );
           case TxTypes.transfer:
             await repo.addTransfer(
@@ -154,10 +163,10 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
         }
       }
       if (mounted) Navigator.pop(context);
-    } on OverspendException catch (e) {
-      _snack(e.message);
+    } on OverspendException {
+      _snack(AppLocalizations.of(context)!.overspendError);
     } catch (e) {
-      _snack('Có lỗi xảy ra: $e');
+      _snack(AppLocalizations.of(context)!.commonUnexpectedError(e.toString()));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -167,16 +176,18 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
     final sym = ref.watch(settingsProvider).currencySymbol;
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: Text(_isEdit ? 'Sửa giao dịch' : 'Thêm nhanh')),
+      appBar: AppBar(
+          title: Text(_isEdit ? l10n.quickAddEditTitle : l10n.commonQuickAddLabel)),
       body: StreamBuilder<List<Wallet>>(
         stream: repo.watchWallets(),
         builder: (context, wSnap) {
           final wallets = wSnap.data ?? const [];
           if (wallets.isEmpty) {
-            return const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: Text('Hãy thêm ít nhất một ví trước khi ghi giao dịch.')),
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text(l10n.quickAddNoWalletMessage)),
             );
           }
           // Load active categories from DB for the current type.
@@ -189,7 +200,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
               final cats = catSnap.data;
               final catItems = cats != null && cats.isNotEmpty
                   ? cats
-                  : _fallbackCats(_type);
+                  : _fallbackCats(_type, l10n);
 
               // Reset category if it's not in the new list.
               if (_category != null &&
@@ -205,14 +216,14 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                   if (_isEdit)
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: Chip(label: Text(TxTypes.labels[_type] ?? _type)),
+                      child: Chip(label: Text(TxTypes.label(l10n, _type))),
                     )
                   else
                     SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: TxTypes.spending, label: Text('Chi tiêu')),
-                        ButtonSegment(value: TxTypes.earning, label: Text('Thu nhập')),
-                        ButtonSegment(value: TxTypes.transfer, label: Text('Chuyển khoản')),
+                      segments: [
+                        ButtonSegment(value: TxTypes.spending, label: Text(l10n.txTypeSpending)),
+                        ButtonSegment(value: TxTypes.earning, label: Text(l10n.txTypeEarning)),
+                        ButtonSegment(value: TxTypes.transfer, label: Text(l10n.txTypeTransfer)),
                       ],
                       selected: {_type},
                       onSelectionChanged: (s) => _onTypeChanged(s.first),
@@ -222,19 +233,19 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                     controller: _amount,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(labelText: 'Số tiền', suffixText: sym),
+                    decoration: InputDecoration(labelText: l10n.fieldAmount, suffixText: sym),
                   ),
                   const SizedBox(height: 16),
                   if (!_isTransfer) ...[
                     TextField(
                       controller: _desc,
                       onChanged: _onDescChanged,
-                      decoration: const InputDecoration(labelText: 'Mô tả'),
+                      decoration: InputDecoration(labelText: l10n.fieldDescription),
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
                       initialValue: _category,
-                      decoration: const InputDecoration(labelText: 'Danh mục'),
+                      decoration: InputDecoration(labelText: l10n.fieldCategory),
                       items: [
                         for (final c in catItems)
                           DropdownMenuItem(value: c.id, child: Text(c.label)),
@@ -246,17 +257,17 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                     ),
                     const SizedBox(height: 16),
                     _walletDropdown(
-                      label: 'Ví', value: _walletId, wallets: wallets,
+                      label: l10n.fieldWallet, value: _walletId, wallets: wallets,
                       onChanged: (v) => setState(() => _walletId = v),
                     ),
                   ] else ...[
                     _walletDropdown(
-                      label: 'Từ ví', value: _walletId, wallets: wallets,
+                      label: l10n.quickAddFromWallet, value: _walletId, wallets: wallets,
                       onChanged: (v) => setState(() => _walletId = v),
                     ),
                     const SizedBox(height: 16),
                     _walletDropdown(
-                      label: 'Đến ví', value: _toWalletId, wallets: wallets,
+                      label: l10n.quickAddToWallet, value: _toWalletId, wallets: wallets,
                       onChanged: (v) => setState(() => _toWalletId = v),
                     ),
                   ],
@@ -264,18 +275,18 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.schedule),
-                      title: const Text('Thời gian'),
+                      title: Text(l10n.quickAddTimeLabel),
                       subtitle: Text(formatDateTime(_timestamp)),
-                      trailing: TextButton(onPressed: _pickTime, child: const Text('Sửa')),
+                      trailing: TextButton(onPressed: _pickTime, child: Text(l10n.commonEdit)),
                     ),
                   ),
                   if (!_isTransfer)
                     SwitchListTile(
-                      secondary: Icon(
-                        _starred ? Icons.star : Icons.star_border,
+                      secondary: AppIcon('star',
+                        fallback: _starred ? Icons.star : Icons.star_border,
                         color: Colors.amber.shade600,
                       ),
-                      title: const Text('Đánh dấu sao'),
+                      title: Text(l10n.commonMarkStarred),
                       value: _starred,
                       onChanged: (v) => setState(() => _starred = v),
                     ),
@@ -287,7 +298,7 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
                             width: 18, height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.check),
-                    label: Text(_isEdit ? 'Lưu thay đổi' : 'Lưu'),
+                    label: Text(_isEdit ? l10n.commonSaveChanges : l10n.commonSave),
                   ),
                 ],
               );
@@ -316,13 +327,13 @@ class _QuickAddPageState extends ConsumerState<QuickAddPage> {
 
 /// Builds fallback AppCategory-like objects from the hardcoded domain list
 /// so the dropdown is never empty while the DB query is loading.
-List<AppCategory> _fallbackCats(String type) {
+List<AppCategory> _fallbackCats(String type, AppLocalizations l10n) {
   final ids = Categories.forType(type);
   return [
     for (var i = 0; i < ids.length; i++)
       AppCategory(
         id: ids[i],
-        label: Categories.label(ids[i]),
+        label: Categories.label(l10n, ids[i]),
         kind: type,
         threshold: 0,
         isDefault: true,

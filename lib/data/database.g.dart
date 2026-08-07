@@ -47,9 +47,15 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _balanceCutoffAtMeta =
+      const VerificationMeta('balanceCutoffAt');
+  @override
+  late final GeneratedColumn<int> balanceCutoffAt = GeneratedColumn<int>(
+      'balance_cutoff_at', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns =>
-      [id, name, initialBalance, type, packageName, sortOrder];
+      [id, name, initialBalance, type, packageName, sortOrder, balanceCutoffAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -91,6 +97,12 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
       context.handle(_sortOrderMeta,
           sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
     }
+    if (data.containsKey('balance_cutoff_at')) {
+      context.handle(
+          _balanceCutoffAtMeta,
+          balanceCutoffAt.isAcceptableOrUnknown(
+              data['balance_cutoff_at']!, _balanceCutoffAtMeta));
+    }
     return context;
   }
 
@@ -112,6 +124,8 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
           .read(DriftSqlType.string, data['${effectivePrefix}package_name']),
       sortOrder: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
+      balanceCutoffAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}balance_cutoff_at']),
     );
   }
 
@@ -128,13 +142,15 @@ class Wallet extends DataClass implements Insertable<Wallet> {
   final String type;
   final String? packageName;
   final int sortOrder;
+  final int? balanceCutoffAt;
   const Wallet(
       {required this.id,
       required this.name,
       required this.initialBalance,
       required this.type,
       this.packageName,
-      required this.sortOrder});
+      required this.sortOrder,
+      this.balanceCutoffAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -146,6 +162,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       map['package_name'] = Variable<String>(packageName);
     }
     map['sort_order'] = Variable<int>(sortOrder);
+    if (!nullToAbsent || balanceCutoffAt != null) {
+      map['balance_cutoff_at'] = Variable<int>(balanceCutoffAt);
+    }
     return map;
   }
 
@@ -159,6 +178,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           ? const Value.absent()
           : Value(packageName),
       sortOrder: Value(sortOrder),
+      balanceCutoffAt: balanceCutoffAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(balanceCutoffAt),
     );
   }
 
@@ -172,6 +194,7 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       type: serializer.fromJson<String>(json['type']),
       packageName: serializer.fromJson<String?>(json['packageName']),
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      balanceCutoffAt: serializer.fromJson<int?>(json['balanceCutoffAt']),
     );
   }
   @override
@@ -184,6 +207,7 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       'type': serializer.toJson<String>(type),
       'packageName': serializer.toJson<String?>(packageName),
       'sortOrder': serializer.toJson<int>(sortOrder),
+      'balanceCutoffAt': serializer.toJson<int?>(balanceCutoffAt),
     };
   }
 
@@ -193,7 +217,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           int? initialBalance,
           String? type,
           Value<String?> packageName = const Value.absent(),
-          int? sortOrder}) =>
+          int? sortOrder,
+          Value<int?> balanceCutoffAt = const Value.absent()}) =>
       Wallet(
         id: id ?? this.id,
         name: name ?? this.name,
@@ -201,6 +226,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
         type: type ?? this.type,
         packageName: packageName.present ? packageName.value : this.packageName,
         sortOrder: sortOrder ?? this.sortOrder,
+        balanceCutoffAt: balanceCutoffAt.present
+            ? balanceCutoffAt.value
+            : this.balanceCutoffAt,
       );
   Wallet copyWithCompanion(WalletsCompanion data) {
     return Wallet(
@@ -213,6 +241,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       packageName:
           data.packageName.present ? data.packageName.value : this.packageName,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      balanceCutoffAt: data.balanceCutoffAt.present
+          ? data.balanceCutoffAt.value
+          : this.balanceCutoffAt,
     );
   }
 
@@ -224,14 +255,15 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           ..write('initialBalance: $initialBalance, ')
           ..write('type: $type, ')
           ..write('packageName: $packageName, ')
-          ..write('sortOrder: $sortOrder')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('balanceCutoffAt: $balanceCutoffAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, initialBalance, type, packageName, sortOrder);
+  int get hashCode => Object.hash(
+      id, name, initialBalance, type, packageName, sortOrder, balanceCutoffAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -241,7 +273,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           other.initialBalance == this.initialBalance &&
           other.type == this.type &&
           other.packageName == this.packageName &&
-          other.sortOrder == this.sortOrder);
+          other.sortOrder == this.sortOrder &&
+          other.balanceCutoffAt == this.balanceCutoffAt);
 }
 
 class WalletsCompanion extends UpdateCompanion<Wallet> {
@@ -251,6 +284,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
   final Value<String> type;
   final Value<String?> packageName;
   final Value<int> sortOrder;
+  final Value<int?> balanceCutoffAt;
   final Value<int> rowid;
   const WalletsCompanion({
     this.id = const Value.absent(),
@@ -259,6 +293,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     this.type = const Value.absent(),
     this.packageName = const Value.absent(),
     this.sortOrder = const Value.absent(),
+    this.balanceCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WalletsCompanion.insert({
@@ -268,6 +303,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     this.type = const Value.absent(),
     this.packageName = const Value.absent(),
     this.sortOrder = const Value.absent(),
+    this.balanceCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         name = Value(name);
@@ -278,6 +314,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     Expression<String>? type,
     Expression<String>? packageName,
     Expression<int>? sortOrder,
+    Expression<int>? balanceCutoffAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -287,6 +324,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       if (type != null) 'type': type,
       if (packageName != null) 'package_name': packageName,
       if (sortOrder != null) 'sort_order': sortOrder,
+      if (balanceCutoffAt != null) 'balance_cutoff_at': balanceCutoffAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -298,6 +336,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       Value<String>? type,
       Value<String?>? packageName,
       Value<int>? sortOrder,
+      Value<int?>? balanceCutoffAt,
       Value<int>? rowid}) {
     return WalletsCompanion(
       id: id ?? this.id,
@@ -306,6 +345,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       type: type ?? this.type,
       packageName: packageName ?? this.packageName,
       sortOrder: sortOrder ?? this.sortOrder,
+      balanceCutoffAt: balanceCutoffAt ?? this.balanceCutoffAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -331,6 +371,9 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     if (sortOrder.present) {
       map['sort_order'] = Variable<int>(sortOrder.value);
     }
+    if (balanceCutoffAt.present) {
+      map['balance_cutoff_at'] = Variable<int>(balanceCutoffAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -346,6 +389,7 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
           ..write('type: $type, ')
           ..write('packageName: $packageName, ')
           ..write('sortOrder: $sortOrder, ')
+          ..write('balanceCutoffAt: $balanceCutoffAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2179,6 +2223,7 @@ typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
   Value<String> type,
   Value<String?> packageName,
   Value<int> sortOrder,
+  Value<int?> balanceCutoffAt,
   Value<int> rowid,
 });
 typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
@@ -2188,6 +2233,7 @@ typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
   Value<String> type,
   Value<String?> packageName,
   Value<int> sortOrder,
+  Value<int?> balanceCutoffAt,
   Value<int> rowid,
 });
 
@@ -2218,6 +2264,10 @@ class $$WalletsTableFilterComposer
 
   ColumnFilters<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt,
+      builder: (column) => ColumnFilters(column));
 }
 
 class $$WalletsTableOrderingComposer
@@ -2247,6 +2297,10 @@ class $$WalletsTableOrderingComposer
 
   ColumnOrderings<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$WalletsTableAnnotationComposer
@@ -2275,6 +2329,9 @@ class $$WalletsTableAnnotationComposer
 
   GeneratedColumn<int> get sortOrder =>
       $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt, builder: (column) => column);
 }
 
 class $$WalletsTableTableManager extends RootTableManager<
@@ -2306,6 +2363,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             Value<String> type = const Value.absent(),
             Value<String?> packageName = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
+            Value<int?> balanceCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion(
@@ -2315,6 +2373,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             type: type,
             packageName: packageName,
             sortOrder: sortOrder,
+            balanceCutoffAt: balanceCutoffAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -2324,6 +2383,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             Value<String> type = const Value.absent(),
             Value<String?> packageName = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
+            Value<int?> balanceCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion.insert(
@@ -2333,6 +2393,7 @@ class $$WalletsTableTableManager extends RootTableManager<
             type: type,
             packageName: packageName,
             sortOrder: sortOrder,
+            balanceCutoffAt: balanceCutoffAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

@@ -9,11 +9,9 @@ import '../services/csv_service.dart';
 const _uuid = Uuid();
 
 /// Thrown when a spending or transfer would push a wallet below zero.
+/// The UI resolves the localized message from AppLocalizations.overspendError.
 class OverspendException implements Exception {
-  final String message;
-  const OverspendException([this.message = 'Hãy kiểm tra lại số tiền thực tế']);
-  @override
-  String toString() => message;
+  const OverspendException();
 }
 
 class FinanceRepository {
@@ -126,11 +124,14 @@ class FinanceRepository {
     final id = _uuid.v4();
     // Raw SQL sets sort_order = current count so the new wallet appends at bottom.
     // WalletsCompanion doesn't include sortOrder until build_runner regenerates.
-    await db.customStatement(
-      'INSERT INTO wallets (id, name, initial_balance, type, package_name, sort_order) '
-      'VALUES (?, ?, ?, ?, ?, (SELECT COUNT(*) FROM wallets))',
-      [id, name, initialBalance, type, packageName],
-    );
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO wallets (id, name, initial_balance, type, package_name, sort_order) '
+        'VALUES (?, ?, ?, ?, ?, (SELECT COUNT(*) FROM wallets))',
+        [id, name, initialBalance, type, packageName],
+      );
+      db.markTablesUpdated({db.wallets});
+    });
     return id;
   }
 
@@ -140,8 +141,10 @@ class FinanceRepository {
     required int initialBalance,
     required String type,
     required Value<String?> packageName,
-  }) =>
-      (db.update(db.wallets)..where((w) => w.id.equals(id))).write(
+    bool resetTransactions = false,
+  }) async {
+    await db.transaction(() async {
+      await (db.update(db.wallets)..where((w) => w.id.equals(id))).write(
         WalletsCompanion(
           name: Value(name),
           initialBalance: Value(initialBalance),
@@ -149,6 +152,16 @@ class FinanceRepository {
           packageName: packageName,
         ),
       );
+      if (resetTransactions) {
+        // Set a per-wallet cutoff timestamp so only future txns affect this
+        // wallet's balance. Other wallets are unaffected (no global flag change).
+        await db.customStatement(
+          'UPDATE wallets SET balance_cutoff_at = ? WHERE id = ?',
+          [DateTime.now().millisecondsSinceEpoch ~/ 1000, id],
+        );
+      }
+    });
+  }
 
   Future<void> updateWalletsOrder(List<String> ids) =>
       db.updateWalletsOrder(ids);
@@ -180,6 +193,20 @@ class FinanceRepository {
 
   // ── Create transactions ──────────────────────────────────────────────────────
 
+  /// Returns true if [amount] for [category] exceeds its configured threshold.
+  /// Reads from DB, so call this outside any existing transaction.
+  Future<bool> _shouldAutoStar({
+    required int amount,
+    required String? category,
+    required String kind,
+    required bool autostarEnabled,
+  }) async {
+    if (!autostarEnabled || category == null) return false;
+    final thresholds = await db.categoryThresholds(kind);
+    final limit = thresholds[category] ?? 0;
+    return limit > 0 && amount > limit;
+  }
+
   Future<void> addSpending({
     required int amount,
     required String walletId,
@@ -187,7 +214,16 @@ class FinanceRepository {
     String? description,
     DateTime? timestamp,
     bool starred = false,
+    bool autostarEnabled = true,
   }) async {
+    // Auto-star check happens before the DB transaction (read-only, safe).
+    final effectiveStarred = starred ||
+        await _shouldAutoStar(
+          amount: amount,
+          category: category,
+          kind: TxTypes.spending,
+          autostarEnabled: autostarEnabled,
+        );
     await db.transaction(() async {
       await _assertSufficient(walletId, amount);
       final now = DateTime.now();
@@ -200,7 +236,7 @@ class FinanceRepository {
             category: Value(category),
             timestamp: timestamp ?? now,
             createdAt: now,
-            starred: Value(starred),
+            starred: Value(effectiveStarred),
           ));
     });
   }
@@ -212,7 +248,15 @@ class FinanceRepository {
     String? description,
     DateTime? timestamp,
     bool starred = false,
+    bool autostarEnabled = true,
   }) async {
+    final effectiveStarred = starred ||
+        await _shouldAutoStar(
+          amount: amount,
+          category: category,
+          kind: TxTypes.earning,
+          autostarEnabled: autostarEnabled,
+        );
     final now = DateTime.now();
     await db.into(db.txns).insert(TxnsCompanion.insert(
           id: _uuid.v4(),
@@ -223,7 +267,7 @@ class FinanceRepository {
           category: Value(category),
           timestamp: timestamp ?? now,
           createdAt: now,
-          starred: Value(starred),
+          starred: Value(effectiveStarred),
         ));
   }
 
@@ -250,12 +294,30 @@ class FinanceRepository {
 
   // ── Edit / delete ────────────────────────────────────────────────────────────
 
-  Future<void> updateTxn(Txn t) async {
-    await db.transaction(() async {
-      if (t.type == TxTypes.spending || t.type == TxTypes.transfer) {
-        await _assertSufficient(t.walletId, t.amount, excludeId: t.id);
+  Future<void> updateTxn(Txn t, {bool autostarEnabled = true}) async {
+    // If amount changed on a spending/earning txn, re-run auto-star check.
+    Txn effective = t;
+    if (autostarEnabled &&
+        (t.type == TxTypes.spending || t.type == TxTypes.earning) &&
+        t.category != null) {
+      final original = await db.txnById(t.id);
+      if (original != null && original.amount != t.amount) {
+        final autoStar = await _shouldAutoStar(
+          amount: t.amount,
+          category: t.category,
+          kind: t.type,
+          autostarEnabled: autostarEnabled,
+        );
+        if (autoStar) effective = t.copyWith(starred: true);
       }
-      await db.update(db.txns).replace(t);
+    }
+    await db.transaction(() async {
+      if (effective.type == TxTypes.spending ||
+          effective.type == TxTypes.transfer) {
+        await _assertSufficient(effective.walletId, effective.amount,
+            excludeId: effective.id);
+      }
+      await db.update(db.txns).replace(effective);
     });
   }
 

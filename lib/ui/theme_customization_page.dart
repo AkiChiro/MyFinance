@@ -3,9 +3,14 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
+import '../l10n/generated/app_localizations.dart';
 import '../providers.dart';
 import '../services/app_settings.dart';
+import 'widgets/app_icon.dart';
+import 'widgets/icon_slots.dart';
 
 // Preset palette used in all color pickers
 const _palette = <Color>[
@@ -34,13 +39,14 @@ class ThemeCustomizationPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tuỳ chỉnh giao diện'),
+        title: Text(l10n.themeTitle),
         actions: [
           TextButton(
             onPressed: () => _resetAll(context, settings),
-            child: const Text('Đặt lại'),
+            child: Text(l10n.themeResetAction),
           ),
         ],
       ),
@@ -48,15 +54,14 @@ class ThemeCustomizationPage extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         children: [
           // ── Colors ────────────────────────────────────────────────────────
-          _sectionHeader(context, 'Màu sắc'),
+          _sectionHeader(context, l10n.themeColorsSection),
           Card(
             child: Column(
               children: [
                 _ColorPickerTile(
                   icon: Icons.palette_outlined,
-                  title: 'Màu chủ đề',
-                  subtitle:
-                      'Ảnh hưởng tới nút, thanh tiêu đề và toàn bộ bảng màu.',
+                  title: l10n.themeSeedColorTitle,
+                  subtitle: l10n.themeSeedColorSubtitle,
                   color: Color(settings.themeSeedColor),
                   nullable: false,
                   onChanged: (c) {
@@ -69,9 +74,8 @@ class ThemeCustomizationPage extends ConsumerWidget {
                 const Divider(height: 1),
                 _ColorPickerTile(
                   icon: Icons.format_paint_outlined,
-                  title: 'Màu nền ứng dụng',
-                  subtitle: 'Màu nền của màn hình. '
-                      '"Tự động" dùng màu mặc định theo chế độ sáng/tối.',
+                  title: l10n.themeBgColorTitle,
+                  subtitle: l10n.themeBgColorSubtitle,
                   color: settings.scaffoldBgColor,
                   nullable: true,
                   onChanged: (c) => settings.scaffoldBgColor = c,
@@ -79,10 +83,8 @@ class ThemeCustomizationPage extends ConsumerWidget {
                 const Divider(height: 1),
                 _ColorPickerTile(
                   icon: Icons.font_download_outlined,
-                  title: 'Màu chữ',
-                  subtitle:
-                      '"Tự động" theo chế độ sáng/tối. Cẩn thận khi chọn '
-                      'màu tương phản thấp.',
+                  title: l10n.themeFontColorTitle,
+                  subtitle: l10n.themeFontColorSubtitle,
                   color: settings.fontColor,
                   nullable: true,
                   onChanged: (c) => settings.fontColor = c,
@@ -93,15 +95,14 @@ class ThemeCustomizationPage extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // ── Background image ──────────────────────────────────────────────
-          _sectionHeader(context, 'Ảnh nền'),
+          _sectionHeader(context, l10n.themeBgImageSection),
           Card(
             child: Column(
               children: [
                 ListTile(
                   leading: const Icon(Icons.image_outlined),
-                  title: const Text('Chọn ảnh nền'),
-                  subtitle: const Text(
-                      'Ảnh hiển thị phía sau toàn bộ màn hình.'),
+                  title: Text(l10n.themeBgImagePickTitle),
+                  subtitle: Text(l10n.themeBgImagePickSubtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _pickImage(context, settings),
                 ),
@@ -116,10 +117,10 @@ class ThemeCustomizationPage extends ConsumerWidget {
                         height: 120,
                         width: double.infinity,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox(
+                        errorBuilder: (_, __, ___) => SizedBox(
                             height: 40,
                             child: Center(
-                                child: Text('Không tìm thấy ảnh'))),
+                                child: Text(l10n.themeBgImageNotFound))),
                       ),
                     ),
                   ),
@@ -127,7 +128,7 @@ class ThemeCustomizationPage extends ConsumerWidget {
                   ListTile(
                     leading: Icon(Icons.delete_outline,
                         color: Theme.of(context).colorScheme.error),
-                    title: Text('Xoá ảnh nền',
+                    title: Text(l10n.themeBgImageDeleteTitle,
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.error)),
                     onTap: () => settings.bgImagePath = null,
@@ -137,6 +138,34 @@ class ThemeCustomizationPage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
+
+          // ── Icons ────────────────────────────────────────────────────────
+          _sectionHeader(context, l10n.themeIconsSection),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(l10n.themeIconsHint,
+                style: Theme.of(context).textTheme.bodySmall),
+          ),
+          for (final groupId in kIconSlotGroups.keys) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+              child: Text(iconSlotGroupTitle(l10n, groupId),
+                  style: Theme.of(context).textTheme.labelMedium),
+            ),
+            Card(
+              child: Column(
+                children: [
+                  for (final slotId in kIconSlotGroups[groupId]!) ...[
+                    if (slotId != kIconSlotGroups[groupId]!.first)
+                      const Divider(height: 1),
+                    _iconSlotTile(context, settings, l10n, slotId),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          const SizedBox(height: 4),
 
           // ── Note ──────────────────────────────────────────────────────────
           Card(
@@ -151,8 +180,7 @@ class ThemeCustomizationPage extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Khi dùng ảnh nền, nền ứng dụng sẽ tự động trong suốt '
-                      'để hiện ảnh phía sau.',
+                      l10n.themeBgImageNote,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -184,20 +212,58 @@ class ThemeCustomizationPage extends ConsumerWidget {
     if (path != null) settings.bgImagePath = path;
   }
 
+  Widget _iconSlotTile(BuildContext context, AppSettings settings,
+      AppLocalizations l10n, String slotId) {
+    final hasCustom = settings.iconPath(slotId) != null;
+    return ListTile(
+      leading: CircleAvatar(
+        child: AppIcon(slotId, fallback: iconSlotFallback(slotId), size: 20),
+      ),
+      title: Text(iconSlotDisplayName(l10n, slotId)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasCustom)
+            IconButton(
+              icon: const Icon(Icons.restore),
+              tooltip: l10n.themeIconResetTooltip,
+              onPressed: () => settings.setIconPath(slotId, null),
+            ),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
+      onTap: () => _pickIcon(context, settings, slotId),
+    );
+  }
+
+  Future<void> _pickIcon(
+      BuildContext context, AppSettings settings, String slotId) async {
+    final picked = await FilePicker.platform.pickFiles(type: FileType.image);
+    final sourcePath = picked?.files.single.path;
+    if (sourcePath == null) return;
+    final ext = p.extension(sourcePath);
+    final iconsDir = Directory(
+        p.join((await getApplicationDocumentsDirectory()).path, 'customization', 'icons'));
+    await iconsDir.create(recursive: true);
+    final destPath = p.join(iconsDir.path, '$slotId$ext');
+    await File(sourcePath).copy(destPath);
+    settings.setIconPath(slotId, destPath);
+  }
+
   Future<void> _resetAll(BuildContext context, AppSettings settings) async {
+    final l10n = AppLocalizations.of(context)!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Đặt lại giao diện?'),
-        content: const Text(
-            'Màu chủ đề, màu nền, màu chữ và ảnh nền sẽ trở về mặc định.'),
+        title: Text(l10n.themeResetConfirmTitle),
+        content: Text(l10n.themeResetConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Đặt lại')),
+              child: Text(l10n.themeResetAction)),
         ],
       ),
     );
@@ -206,6 +272,9 @@ class ThemeCustomizationPage extends ConsumerWidget {
     settings.scaffoldBgColor = null;
     settings.fontColor = null;
     settings.bgImagePath = null;
+    for (final slotId in kIconSlots) {
+      settings.setIconPath(slotId, null);
+    }
   }
 }
 
@@ -341,6 +410,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context)!;
     return AlertDialog(
       title: Text(widget.title),
       contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -404,10 +474,10 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
               TextField(
                 controller: _hexCtrl,
                 decoration: InputDecoration(
-                  labelText: 'Mã màu Hex',
+                  labelText: l10n.themeHexLabel,
                   prefixText: '#',
                   hintText: 'FF5722',
-                  errorText: _hexError ? 'Mã không hợp lệ (cần 6 ký tự)' : null,
+                  errorText: _hexError ? l10n.themeHexError : null,
                 ),
                 onChanged: _applyHex,
                 onSubmitted: _applyHex,
@@ -422,15 +492,15 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
           TextButton(
             onPressed: () =>
                 Navigator.pop(context, const Color(0x00000000)), // sentinel
-            child: const Text('Tự động'),
+            child: Text(l10n.themeColorAuto),
           ),
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Huỷ'),
+          child: Text(l10n.commonCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, _selected),
-          child: const Text('Lưu'),
+          child: Text(l10n.commonSave),
         ),
       ],
     );

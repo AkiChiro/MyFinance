@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
 import '../repositories/finance_repository.dart';
 import 'captures_page.dart';
+import 'category_colors.dart';
 import 'quick_add_page.dart';
+import 'widgets/app_icon.dart';
 
 class TransactionsPage extends ConsumerStatefulWidget {
   const TransactionsPage({super.key});
@@ -20,13 +23,23 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   bool _starredOnly = false;
   String? _typeFilter; // null = all, TxTypes.spending, TxTypes.earning
   String? _categoryFilter;
-  bool _sortByAmount = false;
+  // null = sort by timestamp, 'asc' = amount lowest first, 'desc' = amount highest first
+  String? _sortDirection;
 
-  Widget _buildFilterBar(
-      BuildContext context, List<AppCategory> allCats, Map<String, String> catLabels) {
+  Widget _buildFilterBar(BuildContext context, List<AppCategory> allCats,
+      Map<String, String> catLabels) {
+    final l10n = AppLocalizations.of(context)!;
     final typeCats = _typeFilter == null
         ? const <AppCategory>[]
         : allCats.where((c) => c.kind == _typeFilter && !c.archived).toList();
+
+    final sortLabel = switch (_sortDirection) {
+      'asc' => l10n.txnsAmountAsc,
+      'desc' => l10n.txnsAmountDesc,
+      _ => l10n.fieldAmount,
+    };
+
+    final monthMode = ref.watch(monthModeProvider);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -34,16 +47,22 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       child: Row(
         children: [
           ChoiceChip(
-            label: const Text('Tất cả'),
+            label: Text(monthMode ? l10n.txnsChipMonth : l10n.txnsChipAll),
             selected: _typeFilter == null,
-            onSelected: (_) => setState(() {
-              _typeFilter = null;
-              _categoryFilter = null;
-            }),
+            onSelected: (_) {
+              if (_typeFilter != null) {
+                setState(() {
+                  _typeFilter = null;
+                  _categoryFilter = null;
+                });
+              } else {
+                ref.read(monthModeProvider.notifier).state = !monthMode;
+              }
+            },
           ),
           const SizedBox(width: 8),
           ChoiceChip(
-            label: const Text('Chi tiêu'),
+            label: Text(l10n.txTypeSpending),
             selected: _typeFilter == TxTypes.spending,
             onSelected: (_) => setState(() {
               _typeFilter = TxTypes.spending;
@@ -52,7 +71,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
           ),
           const SizedBox(width: 8),
           ChoiceChip(
-            label: const Text('Thu nhập'),
+            label: Text(l10n.txTypeEarning),
             selected: _typeFilter == TxTypes.earning,
             onSelected: (_) => setState(() {
               _typeFilter = TxTypes.earning;
@@ -61,10 +80,11 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
           ),
           const SizedBox(width: 8),
           FilterChip(
-            avatar: Icon(Icons.star,
+            avatar: AppIcon('star',
+                fallback: Icons.star,
                 size: 14,
                 color: _starredOnly ? Colors.amber.shade700 : null),
-            label: const Text('Có sao'),
+            label: Text(l10n.txnsChipStarred),
             selected: _starredOnly,
             onSelected: (v) => setState(() => _starredOnly = v),
           ),
@@ -72,7 +92,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
             const SizedBox(width: 8),
             FilterChip(
               label: Text(_categoryFilter == null
-                  ? 'Danh mục'
+                  ? l10n.fieldCategory
                   : (catLabels[_categoryFilter] ?? _categoryFilter!)),
               selected: _categoryFilter != null,
               onSelected: (_) => _pickCategory(context, typeCats),
@@ -81,9 +101,15 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
           const SizedBox(width: 8),
           FilterChip(
             avatar: const Icon(Icons.sort, size: 14),
-            label: const Text('Số tiền'),
-            selected: _sortByAmount,
-            onSelected: (v) => setState(() => _sortByAmount = v),
+            label: Text(sortLabel),
+            selected: _sortDirection != null,
+            onSelected: (_) => setState(() {
+              _sortDirection = switch (_sortDirection) {
+                null => 'asc',
+                'asc' => 'desc',
+                _ => null,
+              };
+            }),
           ),
         ],
       ),
@@ -92,16 +118,17 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
 
   Future<void> _pickCategory(
       BuildContext context, List<AppCategory> cats) async {
+    final l10n = AppLocalizations.of(context)!;
     // Use a list wrapper so we can distinguish "dismissed" (null) from
     // "all selected" ([null]) and "category selected" ([id]).
     final picked = await showDialog<List<String?>>(
       context: context,
       builder: (_) => SimpleDialog(
-        title: const Text('Chọn danh mục'),
+        title: Text(l10n.txnsPickCategoryTitle),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(context, [null]),
-            child: const Text('Tất cả'),
+            child: Text(l10n.txnsChipAll),
           ),
           for (final c in cats)
             SimpleDialogOption(
@@ -119,7 +146,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
-    final settings = ref.watch(settingsProvider);
+    final l10n = AppLocalizations.of(context)!;
 
     return StreamBuilder<List<AppCategory>>(
       stream: repo.watchAllCategories(),
@@ -148,7 +175,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                           color: scheme.onPrimaryContainer),
                     ),
                     title: Text(
-                      '$count thông báo ngân hàng chờ xác nhận',
+                      l10n.pendingCaptureBanner(count),
                       style: TextStyle(color: scheme.onPrimaryContainer),
                     ),
                     trailing: Icon(Icons.chevron_right,
@@ -168,59 +195,64 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                   final walletMap = {
                     for (final w in (wSnap.data ?? const [])) w.id: w.name
                   };
-                  return FutureBuilder<Map<String, int>>(
-                    future: repo.categoryThresholds(TxTypes.spending),
-                    builder: (context, threshSnap) {
-                      final thresholds = threshSnap.data ?? {};
-                      return StreamBuilder<List<Txn>>(
-                        stream: repo.watchTxns(),
-                        builder: (context, tSnap) {
-                          var txns = tSnap.data ?? const [];
-                          // Apply filters.
-                          if (_starredOnly) {
-                            txns = txns
-                                .where((t) =>
-                                    t.starred ||
-                                    isAutoStarred(t, thresholds,
-                                        enabled: settings.autostarEnabled))
-                                .toList();
-                          }
-                          if (_typeFilter != null) {
-                            txns = txns
-                                .where((t) => t.type == _typeFilter)
-                                .toList();
-                          }
-                          if (_categoryFilter != null) {
-                            txns = txns
-                                .where((t) => t.category == _categoryFilter)
-                                .toList();
-                          }
-                          if (_sortByAmount) {
-                            txns = [...txns]
-                              ..sort((a, b) => b.amount.compareTo(a.amount));
-                          }
+                  return StreamBuilder<List<Txn>>(
+                    stream: repo.watchTxns(),
+                    builder: (context, tSnap) {
+                      var txns = tSnap.data ?? const [];
+                      // Apply filters.
+                      final monthMode = ref.watch(monthModeProvider);
+                      final selectedMonth = ref.watch(selectedMonthProvider);
+                      if (monthMode) {
+                        txns = txns
+                            .where((t) =>
+                                t.timestamp.year == selectedMonth.year &&
+                                t.timestamp.month == selectedMonth.month)
+                            .toList();
+                      }
+                      if (_starredOnly) {
+                        txns = txns.where((t) => t.starred).toList();
+                      }
+                      if (_typeFilter != null) {
+                        txns = txns
+                            .where((t) => t.type == _typeFilter)
+                            .toList();
+                      }
+                      if (_categoryFilter != null) {
+                        txns = txns
+                            .where((t) => t.category == _categoryFilter)
+                            .toList();
+                      }
+                      if (_sortDirection == 'asc') {
+                        txns = [...txns]
+                          ..sort((a, b) => a.amount.compareTo(b.amount));
+                      } else if (_sortDirection == 'desc') {
+                        txns = [...txns]
+                          ..sort((a, b) => b.amount.compareTo(a.amount));
+                      }
 
-                          if (txns.isEmpty) {
-                            return Center(
-                              child: Text(_starredOnly
-                                  ? 'Không có giao dịch nào có sao.'
-                                  : 'Chưa có giao dịch nào.'),
-                            );
-                          }
-                          return ListView.builder(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemCount: txns.length,
-                            itemBuilder: (context, i) => _TxnTile(
-                              txn: txns[i],
-                              thresholds: thresholds,
-                              catLabels: catLabels,
-                              walletName: (id) =>
-                                  walletMap.containsKey(id)
+                      final emptyMessage = _starredOnly
+                          ? l10n.txnsEmptyStarred
+                          : monthMode
+                              ? l10n.txnsEmptyMonth
+                              : l10n.txnsEmptyAll;
+
+                      return AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: txns.isEmpty
+                            ? _TxnsEmpty(
+                                key: const ValueKey('empty'), message: emptyMessage)
+                            : ListView.builder(
+                                key: const ValueKey('list'),
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                itemCount: txns.length,
+                                itemBuilder: (context, i) => _TxnTile(
+                                  txn: txns[i],
+                                  catLabels: catLabels,
+                                  walletName: (id) => walletMap.containsKey(id)
                                       ? walletMap[id]!
-                                      : '(ví khác)',
-                            ),
-                          );
-                        },
+                                      : l10n.txnsOtherWallet,
+                                ),
+                              ),
                       );
                     },
                   );
@@ -234,44 +266,77 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
   }
 }
 
+// ── Empty state ─────────────────────────────────────────────────────────────
+
+class _TxnsEmpty extends StatelessWidget {
+  const _TxnsEmpty({super.key, required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.receipt_long_outlined,
+              size: 64, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: 12),
+          Text(message, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Tile ──────────────────────────────────────────────────────────────────────
 
 class _TxnTile extends ConsumerWidget {
   const _TxnTile({
     required this.txn,
     required this.walletName,
-    required this.thresholds,
     required this.catLabels,
   });
 
   final Txn txn;
   final String Function(String id) walletName;
-  final Map<String, int> thresholds;
   final Map<String, String> catLabels;
 
-  String _catLabel(String? id) =>
-      id == null ? '—' : (catLabels[id] ?? Categories.label(id));
+  String _catLabel(AppLocalizations l10n, String? id) =>
+      id == null ? '—' : (catLabels[id] ?? Categories.label(l10n, id));
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
 
     final scheme = Theme.of(context).colorScheme;
     final isSpending = txn.type == TxTypes.spending;
     final isTransfer = txn.type == TxTypes.transfer;
 
-    final (IconData icon, Color color) = switch (txn.type) {
-      TxTypes.spending => (Icons.south_west, scheme.error),
-      TxTypes.earning => (Icons.north_east, Colors.green.shade700),
-      _ => (Icons.swap_horiz, scheme.primary),
+    final (String iconSlot, IconData icon) = switch (txn.type) {
+      TxTypes.spending => ('type_spending', Icons.south_west),
+      TxTypes.earning => ('type_earning', Icons.north_east),
+      _ => ('type_transfer', Icons.swap_horiz),
+    };
+    // Amount text stays semantic (spend/earn/transfer) so it's still a
+    // 1-glance scan; the icon uses per-category color for richer info.
+    final amountColor = switch (txn.type) {
+      TxTypes.spending => scheme.error,
+      TxTypes.earning => Colors.green.shade700,
+      _ => scheme.primary,
+    };
+    final iconColor = switch (txn.type) {
+      TxTypes.spending => spendColor(txn.category),
+      TxTypes.earning => earnColor(txn.category),
+      _ => scheme.primary,
     };
 
     String resolveWallet(String? id, String? snapshot) {
-      if (id == null || id.isEmpty) return snapshot ?? '(ví khác)';
+      if (id == null || id.isEmpty) return snapshot ?? l10n.txnsOtherWallet;
       final live = walletName(id);
-      if (live != '(ví khác)') return live;
-      return snapshot ?? '(ví khác)';
+      if (live != l10n.txnsOtherWallet) return live;
+      return snapshot ?? l10n.txnsOtherWallet;
     }
 
     final title = isTransfer
@@ -279,11 +344,11 @@ class _TxnTile extends ConsumerWidget {
             '${resolveWallet(txn.walletToId, txn.walletToName)}'
         : (txn.description?.isNotEmpty == true
             ? txn.description!
-            : _catLabel(txn.category));
+            : _catLabel(l10n, txn.category));
 
     final subtitleParts = <String>[
-      TxTypes.labels[txn.type] ?? txn.type,
-      if (!isTransfer) _catLabel(txn.category),
+      TxTypes.label(l10n, txn.type),
+      if (!isTransfer) _catLabel(l10n, txn.category),
       if (!isTransfer) resolveWallet(txn.walletId, txn.walletFromName),
       formatDateTime(txn.timestamp),
     ];
@@ -295,50 +360,43 @@ class _TxnTile extends ConsumerWidget {
         : formatSigned(txn.amount,
             negative: isSpending, symbol: sym, suffix: suf);
 
-    final autoStar =
-        isAutoStarred(txn, thresholds, enabled: settings.autostarEnabled);
-    final showStar = txn.starred || autoStar;
-
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: color.withValues(alpha: 0.12),
-        child: Icon(icon, color: color),
+        backgroundColor: iconColor.withValues(alpha: 0.12),
+        child: AppIcon(iconSlot, fallback: icon, color: iconColor),
       ),
       title: Row(
         children: [
           Expanded(
               child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-          if (showStar)
+          if (txn.starred)
             Padding(
               padding: const EdgeInsets.only(left: 4),
-              child: Icon(
-                txn.starred ? Icons.star : Icons.star_border,
-                size: 16,
-                color: Colors.amber.shade600,
-              ),
+              child: AppIcon('star',
+                  fallback: Icons.star, size: 16, color: Colors.amber.shade600),
             ),
           if (txn.imported)
             Padding(
               padding: const EdgeInsets.only(left: 6),
-              child: _Chip(label: 'đã nhập', scheme: scheme),
+              child: _Chip(label: l10n.txnsImportedBadge, scheme: scheme),
             ),
         ],
       ),
       subtitle: Text(subtitleParts.join(' · '),
           maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: Text(amountText,
-          style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          style: TextStyle(color: amountColor, fontWeight: FontWeight.w600)),
       onTap: txn.imported
           ? null
           : () => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => QuickAddPage(editing: txn),
               )),
-      onLongPress: () => _showActionSheet(context, repo, showStar: showStar),
+      onLongPress: () => _showActionSheet(context, repo, l10n),
     );
   }
 
-  void _showActionSheet(BuildContext context, FinanceRepository repo,
-      {required bool showStar}) {
+  void _showActionSheet(
+      BuildContext context, FinanceRepository repo, AppLocalizations l10n) {
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -348,7 +406,7 @@ class _TxnTile extends ConsumerWidget {
             if (!txn.imported) ...[
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('Sửa'),
+                title: Text(l10n.commonEdit),
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.of(context).push(MaterialPageRoute(
@@ -357,11 +415,12 @@ class _TxnTile extends ConsumerWidget {
                 },
               ),
               ListTile(
-                leading: Icon(
-                  showStar ? Icons.star : Icons.star_border,
+                leading: AppIcon('star',
+                  fallback: txn.starred ? Icons.star : Icons.star_border,
                   color: Colors.amber.shade600,
                 ),
-                title: Text(showStar ? 'Bỏ đánh dấu sao' : 'Đánh dấu sao'),
+                title: Text(
+                    txn.starred ? l10n.txnsUnmarkStarred : l10n.commonMarkStarred),
                 onTap: () {
                   Navigator.pop(ctx);
                   repo.toggleStar(txn);
@@ -371,22 +430,22 @@ class _TxnTile extends ConsumerWidget {
             ListTile(
               leading: Icon(Icons.delete_outline,
                   color: Theme.of(context).colorScheme.error),
-              title: Text('Xoá',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error)),
+              title: Text(l10n.commonDelete,
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.error)),
               onTap: () async {
                 Navigator.pop(ctx);
                 final ok = await showDialog<bool>(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: const Text('Xoá giao dịch?'),
+                    title: Text(l10n.txnsDeleteConfirmTitle),
                     actions: [
                       TextButton(
                           onPressed: () => Navigator.pop(context, false),
-                          child: const Text('Huỷ')),
+                          child: Text(l10n.commonCancel)),
                       FilledButton(
                           onPressed: () => Navigator.pop(context, true),
-                          child: const Text('Xoá')),
+                          child: Text(l10n.commonDelete)),
                     ],
                   ),
                 );

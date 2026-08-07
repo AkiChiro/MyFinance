@@ -4,26 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
-
-// ---------------------------------------------------------------------------
-// Category colours
-// ---------------------------------------------------------------------------
-const _spendColors = <String, Color>{
-  'necessities': Color(0xFFFF7043),
-  'food': Color(0xFFFFCA28),
-  'hobbies': Color(0xFF7E57C2),
-  'others': Color(0xFF78909C),
-};
-const _earnColors = <String, Color>{
-  'provided': Color(0xFF66BB6A),
-  'self_earned': Color(0xFF42A5F5),
-  'others_earn': Color(0xFF78909C),
-};
-
-Color _spendColor(String cat) => _spendColors[cat] ?? const Color(0xFF78909C);
-Color _earnColor(String cat) => _earnColors[cat] ?? const Color(0xFF78909C);
+import 'category_colors.dart';
+import 'widgets/app_icon.dart';
 
 // ---------------------------------------------------------------------------
 // Analytics data holder
@@ -122,6 +107,7 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
               return const Center(child: CircularProgressIndicator());
             }
             final s = _Stats.fromBundle(bundle);
+            final l10n = AppLocalizations.of(context)!;
 
             return ListView(
               padding: const EdgeInsets.all(12),
@@ -134,20 +120,20 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
                 const SizedBox(height: 16),
                 if (s.spendByCat.isNotEmpty) ...[
                   _PieSection(
-                    title: 'Chi tiêu theo danh mục',
+                    title: l10n.analyticsSpendByCategoryTitle,
                     data: s.spendByCat,
                     total: s.spending,
-                    colorOf: _spendColor,
+                    colorOf: spendColor,
                     catLabels: catLabels,
                   ),
                   const SizedBox(height: 16),
                 ],
                 if (s.earnByCat.isNotEmpty) ...[
                   _PieSection(
-                    title: 'Thu nhập theo danh mục',
+                    title: l10n.analyticsEarnByCategoryTitle,
                     data: s.earnByCat,
                     total: s.earning,
-                    colorOf: _earnColor,
+                    colorOf: earnColor,
                     catLabels: catLabels,
                   ),
                   const SizedBox(height: 16),
@@ -207,6 +193,7 @@ class _SummaryCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final net = stats.net;
     final netColor =
         net >= 0 ? Colors.green.shade700 : Theme.of(context).colorScheme.error;
@@ -215,18 +202,24 @@ class _SummaryCards extends StatelessWidget {
         Row(
           children: [
             _StatCard(
-              label: 'Tổng chi',
+              label: l10n.analyticsTotalSpending,
               value: formatVnd(stats.spending),
               color: Theme.of(context).colorScheme.error,
-              icon: Icons.south_west,
+              icon: AppIcon('type_spending',
+                  fallback: Icons.south_west,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.error),
               pct: _pct(stats.spending, stats.prevSpending),
             ),
             const SizedBox(width: 8),
             _StatCard(
-              label: 'Tổng thu',
+              label: l10n.analyticsTotalEarning,
               value: formatVnd(stats.earning),
               color: Colors.green.shade700,
-              icon: Icons.north_east,
+              icon: AppIcon('type_earning',
+                  fallback: Icons.north_east,
+                  size: 16,
+                  color: Colors.green.shade700),
               pct: _pct(stats.earning, stats.prevEarning),
             ),
           ],
@@ -238,7 +231,7 @@ class _SummaryCards extends StatelessWidget {
               net >= 0 ? Icons.trending_up : Icons.trending_down,
               color: netColor,
             ),
-            title: const Text('Chênh lệch tháng này'),
+            title: Text(l10n.analyticsNetThisMonth),
             trailing: Text(
               (net >= 0 ? '+' : '') + formatVnd(net),
               style:
@@ -246,7 +239,8 @@ class _SummaryCards extends StatelessWidget {
             ),
             subtitle: stats.prevNet != 0
                 ? Text(
-                    'So tháng trước: ${_pctStr(_pct(net, stats.prevNet))}',
+                    l10n.analyticsNetComparisonLabel(
+                        _signedPctStr(_pct(net, stats.prevNet)!)),
                     style: TextStyle(
                         color: (net >= stats.prevNet
                             ? Colors.green.shade700
@@ -276,11 +270,12 @@ class _StatCard extends StatelessWidget {
   final String label;
   final String value;
   final Color color;
-  final IconData icon;
+  final Widget icon;
   final double? pct;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Expanded(
       child: Card(
         child: Padding(
@@ -290,7 +285,7 @@ class _StatCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(icon, size: 16, color: color),
+                  icon,
                   const SizedBox(width: 4),
                   Text(label,
                       style: Theme.of(context).textTheme.labelSmall),
@@ -303,7 +298,7 @@ class _StatCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                       fontSize: 14)),
               if (pct != null)
-                Text(_pctStr(pct),
+                Text(l10n.analyticsPctSuffix(_signedPctStr(pct!)),
                     style: Theme.of(context)
                         .textTheme
                         .labelSmall
@@ -316,11 +311,8 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-String _pctStr(double? pct) {
-  if (pct == null) return '';
-  final sign = pct >= 0 ? '+' : '';
-  return '$sign${pct.toStringAsFixed(1)}% so tháng trước';
-}
+String _signedPctStr(double pct) =>
+    '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}%';
 
 // ---------------------------------------------------------------------------
 // Bar chart — this month vs previous month
@@ -332,6 +324,7 @@ class _BarSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final prev = DateTime(month.year, month.month - 1);
     final maxY = [
           stats.spending.toDouble(),
@@ -342,10 +335,10 @@ class _BarSection extends StatelessWidget {
         1.15;
 
     if (maxY == 0) {
-      return const Card(
+      return Card(
           child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: Text('Chưa có dữ liệu.'))));
+              padding: const EdgeInsets.all(16),
+              child: Center(child: Text(l10n.analyticsNoData))));
     }
 
     final errorColor = Theme.of(context).colorScheme.error;
@@ -358,7 +351,7 @@ class _BarSection extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.only(left: 8, bottom: 8),
-              child: Text('So sánh tháng',
+              child: Text(l10n.analyticsMonthComparisonTitle,
                   style: Theme.of(context)
                       .textTheme
                       .titleSmall
@@ -367,17 +360,18 @@ class _BarSection extends StatelessWidget {
             Row(
               children: [
                 _LegendDot(color: errorColor.withValues(alpha: 0.5),
-                    label: 'Chi (${formatMonth(prev)})'),
+                    label: l10n.spendingLegendLabel(formatMonth(prev))),
                 const SizedBox(width: 12),
-                _LegendDot(color: errorColor, label: 'Chi (${formatMonth(month)})'),
+                _LegendDot(color: errorColor,
+                    label: l10n.spendingLegendLabel(formatMonth(month))),
                 const SizedBox(width: 12),
                 _LegendDot(
                     color: Colors.green.shade300,
-                    label: 'Thu (${formatMonth(prev)})'),
+                    label: l10n.earningLegendLabel(formatMonth(prev))),
                 const SizedBox(width: 12),
                 _LegendDot(
                     color: Colors.green.shade700,
-                    label: 'Thu (${formatMonth(month)})'),
+                    label: l10n.earningLegendLabel(formatMonth(month))),
               ],
             ),
             const SizedBox(height: 12),
@@ -425,7 +419,7 @@ class _BarSection extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (v, _) => Text(
-                          v == 0 ? 'Chi tiêu' : 'Thu nhập',
+                          v == 0 ? l10n.txTypeSpending : l10n.txTypeEarning,
                           style: const TextStyle(fontSize: 11),
                         ),
                       ),
@@ -508,6 +502,7 @@ class _PieSectionState extends State<_PieSection> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final entries = widget.data.entries.toList();
     return Card(
       child: Padding(
@@ -585,7 +580,7 @@ class _PieSectionState extends State<_PieSection> {
                             Expanded(
                               child: Text(
                                 widget.catLabels[e.key] ??
-                                    Categories.label(e.key),
+                                    Categories.label(l10n, e.key),
                                 style: const TextStyle(fontSize: 12),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -605,7 +600,7 @@ class _PieSectionState extends State<_PieSection> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('Tổng: ${formatVnd(widget.total)}',
+            Text(l10n.analyticsCategoryTotal(formatVnd(widget.total)),
                 style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
@@ -624,6 +619,7 @@ class _YearCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final net = stats.yearNet;
     final netColor =
         net >= 0 ? Colors.green.shade700 : Theme.of(context).colorScheme.error;
@@ -633,23 +629,23 @@ class _YearCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Năm $year',
+            Text(l10n.yearCardTitle(year),
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             _YearRow(
-                label: 'Tổng chi',
+                label: l10n.analyticsTotalSpending,
                 value: formatVnd(stats.yearSpending),
                 color: Theme.of(context).colorScheme.error),
             _YearRow(
-                label: 'Tổng thu',
+                label: l10n.analyticsTotalEarning,
                 value: formatVnd(stats.yearEarning),
                 color: Colors.green.shade700),
             const Divider(),
             _YearRow(
-              label: 'Chênh lệch',
+              label: l10n.analyticsNetLabel,
               value: (net >= 0 ? '+' : '') + formatVnd(net),
               color: netColor,
               bold: true,

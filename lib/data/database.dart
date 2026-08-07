@@ -19,6 +19,8 @@ class Wallets extends Table {
   // nullable: at most one wallet maps to a given bank app package (ADR-0014).
   TextColumn get packageName => text().nullable()();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  // Unix seconds; when set, only txns at or after this timestamp affect the balance.
+  IntColumn get balanceCutoffAt => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -137,7 +139,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -200,6 +202,13 @@ class AppDatabase extends _$AppDatabase {
               'UPDATE wallets SET sort_order = (SELECT COUNT(*) FROM wallets w2 WHERE w2.name < wallets.name)',
             );
           }
+          if (from < 7) {
+            // Per-wallet balance cutoff timestamp (Option C for balance reset).
+            // NULL = no cutoff; txns from all time count toward balance.
+            await customStatement(
+              'ALTER TABLE wallets ADD COLUMN balance_cutoff_at INTEGER NULL',
+            );
+          }
         },
       );
 
@@ -248,12 +257,17 @@ class AppDatabase extends _$AppDatabase {
             [i, orderedIds[i]],
           );
         }
+        // customStatement bypasses Drift's change tracker — notify explicitly.
+        markTablesUpdated({wallets});
       });
 
   Future<List<Wallet>> allWallets() => select(wallets).get();
 
   Future<Wallet?> walletById(String id) =>
       (select(wallets)..where((w) => w.id.equals(id))).getSingleOrNull();
+
+  Future<Txn?> txnById(String id) =>
+      (select(txns)..where((t) => t.id.equals(id))).getSingleOrNull();
 
   // ── Transactions ─────────────────────────────────────────────────────────────
 
@@ -288,22 +302,32 @@ class AppDatabase extends _$AppDatabase {
   /// One-shot single-wallet balance. Pass [excludeId] on the edit path
   /// (overspend check must ignore the transaction being updated).
   Future<int> sqlBalance(String walletId, {String? excludeId}) async {
+    // Fetch per-wallet cutoff (Unix seconds); 0 = include all transactions.
+    final cutoffRows = await customSelect(
+      'SELECT balance_cutoff_at FROM wallets WHERE id=?',
+      variables: [Variable<String>(walletId)],
+      readsFrom: {wallets},
+    ).get();
+    final cutoff = cutoffRows.isEmpty
+        ? 0
+        : (cutoffRows.single.readNullable<int>('balance_cutoff_at') ?? 0);
+
     final sql = excludeId == null ? _kSingleBalanceSql : _kSingleBalanceExcludeSql;
     final List<Variable<Object>> vars;
     if (excludeId == null) {
       vars = [
-        Variable<String>(walletId),
-        Variable<String>(walletId),
-        Variable<String>(walletId),
-        Variable<String>(walletId),
+        Variable<String>(walletId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<int>(cutoff),
         Variable<String>(walletId),
       ];
     } else {
       vars = [
-        Variable<String>(walletId), Variable<String>(excludeId),
-        Variable<String>(walletId), Variable<String>(excludeId),
-        Variable<String>(walletId), Variable<String>(excludeId),
-        Variable<String>(walletId), Variable<String>(excludeId),
+        Variable<String>(walletId), Variable<String>(excludeId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<String>(excludeId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<String>(excludeId), Variable<int>(cutoff),
+        Variable<String>(walletId), Variable<String>(excludeId), Variable<int>(cutoff),
         Variable<String>(walletId),
       ];
     }
@@ -348,7 +372,7 @@ class AppDatabase extends _$AppDatabase {
         COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='spending' THEN amount END), 0) AS year_sp,
         COALESCE(SUM(CASE WHEN timestamp>=? AND timestamp<? AND type='earning'  THEN amount END), 0) AS year_ea
       FROM txns
-      WHERE affects_balance=1 AND type!='transfer'
+      WHERE type!='transfer'
       ''',
       variables: [
         Variable<int>(currStart), Variable<int>(currEnd),
@@ -365,7 +389,7 @@ class AppDatabase extends _$AppDatabase {
       '''
       SELECT COALESCE(category, 'others') AS cat, SUM(amount) AS total
       FROM txns
-      WHERE affects_balance=1 AND type='spending' AND timestamp>=? AND timestamp<?
+      WHERE type='spending' AND timestamp>=? AND timestamp<?
       GROUP BY cat
       ''',
       variables: [Variable<int>(currStart), Variable<int>(currEnd)],
@@ -376,7 +400,7 @@ class AppDatabase extends _$AppDatabase {
       '''
       SELECT COALESCE(category, 'others_earn') AS cat, SUM(amount) AS total
       FROM txns
-      WHERE affects_balance=1 AND type='earning' AND timestamp>=? AND timestamp<?
+      WHERE type='earning' AND timestamp>=? AND timestamp<?
       GROUP BY cat
       ''',
       variables: [Variable<int>(currStart), Variable<int>(currEnd)],
@@ -461,55 +485,60 @@ class AppDatabase extends _$AppDatabase {
 // then groups by wallet so transfers are counted on both sides.
 
 /// All wallets: returns one row per wallet with columns (id TEXT, balance INTEGER).
+/// Applies each wallet's balance_cutoff_at per-wallet so a reset on wallet A
+/// does not affect wallet B's side of a shared transfer row.
 const _kAllBalancesSql = '''
   SELECT w.id AS id,
     w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
   FROM wallets w
   LEFT JOIN (
     SELECT wid, SUM(delta) AS delta_sum FROM (
-      SELECT wallet_id    AS wid,  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1
+      SELECT wallet_id    AS wid,  amount AS delta, timestamp AS ts FROM txns WHERE type='earning'  AND affects_balance=1
       UNION ALL
-      SELECT wallet_id    AS wid, -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1
+      SELECT wallet_id    AS wid, -amount AS delta, timestamp AS ts FROM txns WHERE type='spending' AND affects_balance=1
       UNION ALL
-      SELECT wallet_id    AS wid, -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1
+      SELECT wallet_id    AS wid, -amount AS delta, timestamp AS ts FROM txns WHERE type='transfer' AND affects_balance=1
       UNION ALL
-      SELECT wallet_to_id AS wid,  amount AS delta FROM txns
+      SELECT wallet_to_id AS wid,  amount AS delta, timestamp AS ts FROM txns
         WHERE type='transfer' AND affects_balance=1 AND wallet_to_id IS NOT NULL
-    ) GROUP BY wid
+    ) pairs
+    JOIN wallets wc ON wc.id = pairs.wid
+    WHERE pairs.ts >= COALESCE(wc.balance_cutoff_at, 0)
+    GROUP BY wid
   ) c ON c.wid = w.id
 ''';
 
-/// Single wallet (no excludeId). 5 positional params, all = walletId.
+/// Single wallet (no excludeId). 9 positional params: (walletId, cutoff) × 4 + walletId.
 const _kSingleBalanceSql = '''
   SELECT w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
   FROM wallets w
   LEFT JOIN (
     SELECT SUM(delta) AS delta_sum FROM (
-      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=?
+      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=?    AND timestamp>=?
       UNION ALL
-      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=?
+      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=?    AND timestamp>=?
       UNION ALL
-      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=?
+      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=?    AND timestamp>=?
       UNION ALL
-      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=?
+      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=? AND timestamp>=?
     )
   ) c
   WHERE w.id=?
 ''';
 
-/// Single wallet excluding one id. 9 params: (walletId, excludeId) × 4 + walletId.
+/// Single wallet excluding one id. 13 params: (walletId, excludeId, cutoff) × 4 + walletId.
 const _kSingleBalanceExcludeSql = '''
   SELECT w.initial_balance + COALESCE(c.delta_sum, 0) AS balance
   FROM wallets w
   LEFT JOIN (
     SELECT SUM(delta) AS delta_sum FROM (
-      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=? AND id!=?
+      SELECT  amount AS delta FROM txns WHERE type='earning'  AND affects_balance=1 AND wallet_id=? AND id!=? AND timestamp>=?
       UNION ALL
-      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=? AND id!=?
+      SELECT -amount AS delta FROM txns WHERE type='spending' AND affects_balance=1 AND wallet_id=? AND id!=? AND timestamp>=?
       UNION ALL
-      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=? AND id!=?
+      SELECT -amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_id=? AND id!=? AND timestamp>=?
       UNION ALL
-      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=? AND id!=?
+      SELECT  amount AS delta FROM txns WHERE type='transfer' AND affects_balance=1 AND wallet_to_id=? AND id!=? AND timestamp>=?
     )
   ) c
   WHERE w.id=?

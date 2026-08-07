@@ -16,3 +16,10 @@ final captureServiceProvider = Provider<CaptureService>((_) => throw Unimplement
 // without requiring a migration of AppSettings to the modern Notifier API.
 // Import from legacy.dart required in Riverpod 3.x.
 final settingsProvider = ChangeNotifierProvider<AppSettings>((_) => throw UnimplementedError());
+
+// Month navigation state — shared between TransactionsPage (writer) and HomePage (reader).
+final monthModeProvider = StateProvider<bool>((ref) => false);
+final selectedMonthProvider = StateProvider<DateTime>((ref) {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month);
+});

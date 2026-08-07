@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 
 const _kActionSpending = 'add_spending';
@@ -20,10 +21,12 @@ class NotificationService {
   static final NotificationService instance = NotificationService._();
 
   final _plugin = FlutterLocalNotificationsPlugin();
+  Locale _locale = const Locale('vi');
 
   /// Initialise the plugin and, if [enabled] is true, request POST_NOTIFICATIONS
   /// permission (Android 13+) before showing the persistent notification.
-  Future<void> init({bool enabled = true}) async {
+  Future<void> init({bool enabled = true, required String locale}) async {
+    _locale = Locale(locale);
     const androidInit = AndroidInitializationSettings('ic_notif');
     await _plugin.initialize(
       const InitializationSettings(android: androidInit),
@@ -54,11 +57,17 @@ class NotificationService {
     await _plugin.cancel(_kNotifId);
   }
 
-  Future<void> showPersistentNotification() async {
-    const androidDetails = AndroidNotificationDetails(
+  /// Shows/re-shows the persistent notification. [locale] updates the
+  /// remembered locale (from AppSettings); omit it to re-post in the last
+  /// known locale, e.g. when an OEM dismisses the notification on tap.
+  Future<void> showPersistentNotification({String? locale}) async {
+    if (locale != null) _locale = Locale(locale);
+    final l10n = lookupAppLocalizations(_locale);
+
+    final androidDetails = AndroidNotificationDetails(
       _kChannelId,
-      'Thêm nhanh',
-      channelDescription: 'Nút thêm giao dịch nhanh từ thanh thông báo',
+      l10n.commonQuickAddLabel,
+      channelDescription: l10n.notifChannelDescription,
       // IMPORTANCE_DEFAULT makes the channel visible on all OEM skins.
       // Sound and vibration are disabled so it stays non-intrusive.
       importance: Importance.defaultImportance,
@@ -72,11 +81,11 @@ class NotificationService {
       showWhen: false,
       icon: 'ic_notif',
       actions: [
-        AndroidNotificationAction(_kActionSpending, 'Chi tiêu',
+        AndroidNotificationAction(_kActionSpending, l10n.txTypeSpending,
             showsUserInterface: true),
-        AndroidNotificationAction(_kActionEarning, 'Thu nhập',
+        AndroidNotificationAction(_kActionEarning, l10n.txTypeEarning,
             showsUserInterface: true),
-        AndroidNotificationAction(_kActionTransfer, 'Chuyển khoản',
+        AndroidNotificationAction(_kActionTransfer, l10n.txTypeTransfer,
             showsUserInterface: true),
       ],
     );
@@ -84,8 +93,8 @@ class NotificationService {
     await _plugin.show(
       _kNotifId,
       'MyFinance',
-      'Nhấn để ghi giao dịch nhanh',
-      const NotificationDetails(android: androidDetails),
+      l10n.notifBody,
+      NotificationDetails(android: androidDetails),
     );
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
 import '../repositories/finance_repository.dart';
@@ -50,11 +51,14 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
   }
 
   Future<void> _save(BuildContext context, FinanceRepository repo) async {
+    final l10n = AppLocalizations.of(context)!;
     final name = _name.text.trim();
     if (name.isEmpty) {
-      _snack('Vui lòng nhập tên ví.');
+      _snack(l10n.walletEditNameRequired);
       return;
     }
+    final newBalance = parseAmount(_balance.text);
+    final balanceChanged = newBalance != widget.wallet.initialBalance;
     setState(() => _saving = true);
     try {
       final newPkg = _pkg;
@@ -66,18 +70,17 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
           final move = await showDialog<bool>(
             context: context,
             builder: (_) => AlertDialog(
-              title: const Text('Ngân hàng đã được liên kết'),
+              title: Text(l10n.walletsBankConflictTitle),
               content: Text(
-                'Ngân hàng này đang liên kết với ví "${existing.name}". '
-                'Chuyển sang ví này?',
+                l10n.walletEditBankConflictBody(existing.name),
               ),
               actions: [
                 TextButton(
                     onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Huỷ')),
+                    child: Text(l10n.commonCancel)),
                 FilledButton(
                     onPressed: () => Navigator.pop(context, true),
-                    child: const Text('Chuyển')),
+                    child: Text(l10n.walletBankLinkMoveAction)),
               ],
             ),
           );
@@ -89,9 +92,10 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
           await repo.updateWallet(
             id: widget.wallet.id,
             name: name,
-            initialBalance: parseAmount(_balance.text),
+            initialBalance: newBalance,
             type: _type,
             packageName: const Value(null),
+            resetTransactions: balanceChanged,
           );
           await repo.reassignWalletBankLink(newPkg, widget.wallet.id);
           if (context.mounted) Navigator.pop(context);
@@ -101,36 +105,37 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
       await repo.updateWallet(
         id: widget.wallet.id,
         name: name,
-        initialBalance: parseAmount(_balance.text),
+        initialBalance: newBalance,
         type: _type,
         packageName: Value(newPkg),
+        resetTransactions: balanceChanged,
       );
       if (context.mounted) Navigator.pop(context);
     } catch (e) {
-      _snack('Có lỗi xảy ra: $e');
+      _snack(l10n.commonUnexpectedError(e.toString()));
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _confirmDelete(
       BuildContext context, FinanceRepository repo) async {
+    final l10n = AppLocalizations.of(context)!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Xoá ví "${widget.wallet.name}"?'),
-        content: const Text(
-            'Giao dịch liên quan vẫn được giữ lại nhưng sẽ không còn ví tham chiếu.'),
+        title: Text(l10n.walletEditDeleteConfirmTitle(widget.wallet.name)),
+        content: Text(l10n.walletEditDeleteConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             style: ButtonStyle(
               backgroundColor: WidgetStatePropertyAll(
                   Theme.of(context).colorScheme.error),
             ),
-            child: Text('Xoá',
+            child: Text(l10n.commonDelete,
                 style: TextStyle(
                     color: Theme.of(context).colorScheme.onError)),
           ),
@@ -146,14 +151,15 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sửa ví'),
+        title: Text(l10n.walletEditTitle),
         actions: [
           IconButton(
             icon: Icon(Icons.delete_outline,
                 color: Theme.of(context).colorScheme.error),
-            tooltip: 'Xoá ví',
+            tooltip: l10n.walletEditDeleteTooltip,
             onPressed: _saving ? null : () => _confirmDelete(context, repo),
           ),
         ],
@@ -163,7 +169,7 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
         children: [
           TextField(
             controller: _name,
-            decoration: const InputDecoration(labelText: 'Tên ví'),
+            decoration: InputDecoration(labelText: l10n.walletsNameField),
             textCapitalization: TextCapitalization.words,
           ),
           const SizedBox(height: 16),
@@ -171,19 +177,19 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
             controller: _balance,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              labelText: 'Số dư ban đầu (₫)',
-              helperText:
-                  'Thay đổi giá trị này sẽ ảnh hưởng đến số dư hiện tại.',
+            decoration: InputDecoration(
+              labelText: l10n.walletEditInitialBalanceField,
+              helperText: l10n.walletEditBalanceHelperText,
+              helperMaxLines: 2,
             ),
           ),
           const SizedBox(height: 16),
           SegmentedButton<String>(
-            segments: const [
+            segments: [
               ButtonSegment(
-                  value: WalletKinds.cash, label: Text('Tiền mặt')),
+                  value: WalletKinds.cash, label: Text(l10n.walletKindCash)),
               ButtonSegment(
-                  value: WalletKinds.bank, label: Text('Ngân hàng')),
+                  value: WalletKinds.bank, label: Text(l10n.walletKindBank)),
             ],
             selected: {_type},
             onSelectionChanged: (s) => setState(() => _type = s.first),
@@ -192,10 +198,10 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
           DropdownButtonFormField<String?>(
             initialValue: _pkg,
             decoration:
-                const InputDecoration(labelText: 'Ngân hàng liên kết'),
+                InputDecoration(labelText: l10n.walletsBankLinkField),
             items: [
-              const DropdownMenuItem<String?>(
-                  value: null, child: Text('— Không liên kết —')),
+              DropdownMenuItem<String?>(
+                  value: null, child: Text(l10n.walletEditBankLinkNoneAlt)),
               for (final b in kBankPickerOptions)
                 DropdownMenuItem<String?>(
                     value: b.pkg, child: Text(b.label)),
@@ -211,7 +217,7 @@ class _WalletEditPageState extends ConsumerState<WalletEditPage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.check),
-            label: const Text('Lưu thay đổi'),
+            label: Text(l10n.commonSaveChanges),
           ),
           const SizedBox(height: 80),
         ],
