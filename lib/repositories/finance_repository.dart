@@ -345,6 +345,13 @@ class FinanceRepository {
   static String _dedupKey(String packageName, String rawText) =>
       '$packageName\x1e${_normalizeText(rawText)}';
 
+  /// Fetches a single capture by id, or `null` if it no longer exists
+  /// (e.g. already dismissed/confirmed and — not currently possible, rows are
+  /// never deleted — or a stale id from a notification payload).
+  Future<NotificationCapture?> captureById(String id) =>
+      (db.select(db.notificationCaptures)..where((c) => c.id.equals(id)))
+          .getSingleOrNull();
+
   /// Inserts a notification capture with dedup and wallet-resolution.
   ///
   /// Returns the inserted [NotificationCapture], or `null` if an equivalent

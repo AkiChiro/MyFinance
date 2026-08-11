@@ -12,6 +12,7 @@ import 'services/capture_channel.dart';
 import 'services/capture_service.dart';
 import 'services/category_suggester.dart';
 import 'services/notification_service.dart';
+import 'ui/capture_confirm_page.dart';
 import 'ui/home_page.dart';
 import 'ui/quick_add_page.dart';
 
@@ -24,9 +25,19 @@ Future<void> main() async {
   await suggester.load();
   await NotificationService.instance
       .init(enabled: settings.notifEnabled, locale: settings.locale);
+  // "Thêm" on a capture alert notification: fetch the capture and open the
+  // confirm page. "Bỏ qua" never reaches here — it's handled entirely inside
+  // the background isolate in notification_service.dart.
+  NotificationService.instance.onOpenCapture = (captureId) async {
+    final capture = await repository.captureById(captureId);
+    if (capture == null) return;
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(builder: (_) => CaptureConfirmPage(capture: capture)),
+    );
+  };
   final captureService =
       CaptureService(repo: repository, api: LiveCaptureChannelApi());
-  WidgetsBinding.instance.addObserver(_AppLifecycleObserver(captureService));
+  WidgetsBinding.instance.addObserver(_AppLifecycleObserver(db, captureService));
   // Initial drain after the first frame, when Pigeon channel bindings are
   // registered in configureFlutterEngine.
   WidgetsBinding.instance
@@ -46,8 +57,9 @@ Future<void> main() async {
 }
 
 class _AppLifecycleObserver extends WidgetsBindingObserver {
-  _AppLifecycleObserver(this._captureService);
+  _AppLifecycleObserver(this._db, this._captureService);
 
+  final AppDatabase _db;
   final CaptureService _captureService;
 
   @override
@@ -59,6 +71,12 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
     // foreground so captures are filed promptly on resume.
     if (state == AppLifecycleState.resumed) {
       _captureService.drain();
+      // A "Bỏ qua" capture-alert tap may have dismissed a capture from a
+      // separate background AppDatabase connection (see
+      // notification_service.dart's _onResponseBackground) — this app's own
+      // reactive streams don't see cross-connection writes automatically, so
+      // force them to re-query.
+      _db.markTablesUpdated({_db.notificationCaptures});
     }
   }
 }

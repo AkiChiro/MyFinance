@@ -28,8 +28,7 @@ SettingsPage (ConsumerStatefulWidget)
         │   └─ "Tuỳ chỉnh nâng cao" tile → ThemeCustomizationPage
         ├─ "Sao lưu dữ liệu (CSV)" section
         │   ├─ "Xuất CSV" tile
-        │   ├─ "Nhập CSV (gộp)" tile
-        │   └─ "Nhập CSV (thay thế toàn bộ)" tile
+        │   └─ "Nhập CSV" tile
         ├─ "Danh mục gợi ý" section
         │   └─ "Thư viện từ khoá" tile → KeywordEditorPage
         ├─ "Thông tin" section (about card)
@@ -92,22 +91,24 @@ The toggle both saves the pref and immediately shows/hides the notification.
 ## CSV export (`_export`)
 
 ```dart
-final files = await repo.csv.export();
-await SharePlus.instance.share(ShareParams(files: files, subject: 'MyFinance — sao lưu CSV'));
+final file = await repo.csv.exportAll(
+  settingsEntries: settings.exportEntries(kIconSlots),
+  keywordRules: await suggester.loadRaw(),
+);
+await SharePlus.instance.share(ShareParams(files: [file], subject: 'MyFinance — sao lưu CSV'));
 ```
 
-`CsvService.export()` returns two `XFile`s (transactions.csv, wallets.csv). `SharePlus` opens the system share sheet. `_busy` guards against concurrent taps.
+`CsvService.exportAll()` writes a **single** CSV file covering wallets, transactions, categories, app settings, and the keyword library — see `docs/architecture.md`'s "CSV export/import" section for the row format. `SharePlus` opens the system share sheet. `_busy` guards against concurrent taps.
 
-## CSV import (`_importMerge`)
+## CSV import (`_import`)
 
 ```dart
-1. showDialog → user picks CsvImportMode (contextOnly or reconstructBalance)
+1. showDialog → confirm (non-destructive wording — nothing is deleted)
 2. FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'])
-3. repo.csv.importMerge(file.path, mode)
+3. repo.csv.importAll(file.path)
 ```
 
-**contextOnly**: `affectsBalance = false` — imported rows are display-only history, don't move wallet balances.  
-**reconstructBalance**: `affectsBalance = true` — use for empty wallets being bootstrapped from a CSV backup; the import moves the balance.
+A single import path, no mode picker. `importAll` reads **wallets + transactions only** from the file (categories/settings/keywords are export-only, not restored). Wallets are insert-if-absent — a row whose id already exists in the database is skipped, so the device's live `balance_cutoff_at`/`sort_order`/`package_name` are never clobbered by an older export. Transactions are upserted by id, so re-importing the same file (or importing overlapping backups) is safe and idempotent. The result snackbar reports wallets-added/skipped and transactions-added/updated counts separately.
 
 ## Category management
 
@@ -158,8 +159,8 @@ Calls `CaptureService.seenPackages()` → Pigeon → Kotlin → reads the `seenP
 
 | Call | Source |
 |------|--------|
-| `repo.csv.export()` | `CsvService.export()` |
-| `repo.csv.importMerge(path, mode)` | `CsvService.importMerge()` |
+| `repo.csv.exportAll(settingsEntries:, keywordRules:)` | `CsvService.exportAll()` |
+| `repo.csv.importAll(path)` | `CsvService.importAll()` |
 | `captureService.permissions.requestNotificationListenerPermission()` | `PermissionCoordinator` |
 | `captureService.seenPackages()` | Pigeon → Kotlin |
 | `settings.notifEnabled = v` | `AppSettings.notifEnabled` setter |

@@ -73,5 +73,3 @@ enum ParseStatus { parsed, needsReview, unparsed }
 
 // Append-only: stored by name (textEnum). Never reorder, remove, or rename.
 enum CaptureStatus { pending, confirmed, dismissed }
-
-enum CsvImportMode { contextOnly, reconstructBalance }

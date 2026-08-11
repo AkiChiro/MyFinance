@@ -75,7 +75,13 @@ void main() {
     db = _openDb();
     repo = FinanceRepository(db);
     api = FakeCaptureChannelApi();
-    svc = CaptureService(repo: repo, api: api);
+    // Fake notifier: the real one hits the flutter_local_notifications
+    // platform channel, which isn't available in a pure-Dart test binding.
+    svc = CaptureService(
+      repo: repo,
+      api: api,
+      notify: (_, {walletName}) async {},
+    );
   });
 
   tearDown(() => db.close());

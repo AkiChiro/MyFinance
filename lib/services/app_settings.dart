@@ -119,4 +119,38 @@ class AppSettings extends ChangeNotifier {
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       };
+
+  /// Every known setting as `key -> value` string pairs, for CSV export
+  /// (backup/documentation only — settings are not restored on import).
+  /// [iconSlotIds] is passed in by the caller (`kIconSlots` in
+  /// `lib/ui/widgets/icon_slots.dart`) so this service file doesn't need to
+  /// depend on the UI layer just for a list of ids.
+  List<MapEntry<String, String>> exportEntries(List<String> iconSlotIds) {
+    final entries = <MapEntry<String, String>>[
+      MapEntry('ui.locale', locale),
+      MapEntry('currency.symbol', currencySymbol),
+      MapEntry('autostar.enabled', autostarEnabled.toString()),
+      MapEntry('theme.mode', themeMode),
+      MapEntry('theme.seedColor', themeSeedColor.toString()),
+      MapEntry('notif.enabled', notifEnabled.toString()),
+    ];
+    // ignore: deprecated_member_use
+    final bg = scaffoldBgColor;
+    // ignore: deprecated_member_use
+    if (bg != null) entries.add(MapEntry('ui.scaffoldBgColor', bg.value.toString()));
+    final font = fontColor;
+    // ignore: deprecated_member_use
+    if (font != null) entries.add(MapEntry('ui.fontColor', font.value.toString()));
+    final bgPath = bgImagePath;
+    if (bgPath != null && bgPath.isNotEmpty) {
+      entries.add(MapEntry('ui.bgImagePath', bgPath));
+    }
+    for (final slotId in iconSlotIds) {
+      final path = iconPath(slotId);
+      if (path != null && path.isNotEmpty) {
+        entries.add(MapEntry('ui.icon.$slotId', path));
+      }
+    }
+    return entries;
+  }
 }

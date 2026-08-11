@@ -411,24 +411,17 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get settingsCsvExportSubtitle =>
-      'Chia sẻ/lưu giao dịch và ví ra file CSV.';
+      'Lưu ví, giao dịch, danh mục, giao diện và từ khoá gợi ý ra một file CSV.';
 
   @override
   String get settingsCsvShareSubject => 'MyFinance — sao lưu CSV';
 
   @override
-  String get settingsCsvMergeTitle => 'Nhập CSV (gộp)';
+  String get settingsCsvImportTitle => 'Nhập CSV';
 
   @override
-  String get settingsCsvMergeSubtitle =>
-      'Gộp theo id. Giao dịch nhập chỉ để xem lịch sử — không tính vào số dư hay thống kê.';
-
-  @override
-  String get settingsCsvReplaceTitle => 'Nhập CSV (thay thế toàn bộ)';
-
-  @override
-  String get settingsCsvReplaceSubtitle =>
-      'Xoá toàn bộ dữ liệu hiện tại và khôi phục từ CSV. Cần chọn hai file: ví rồi giao dịch.';
+  String get settingsCsvImportSubtitle =>
+      'Nhập ví và giao dịch từ file CSV. Ví trùng id được giữ nguyên; giao dịch trùng id được cập nhật.';
 
   @override
   String get settingsKeywordLibraryTitle => 'Thư viện từ khoá';
@@ -461,60 +454,27 @@ class AppLocalizationsVi extends AppLocalizations {
   }
 
   @override
-  String get settingsImportModeTitle => 'Chọn chế độ nhập';
+  String get settingsCsvImportConfirmTitle => 'Nhập dữ liệu từ CSV?';
 
   @override
-  String get settingsImportContextOnlyTitle => 'Chỉ lưu trữ';
+  String get settingsCsvImportConfirmBody =>
+      'Ví có id đã tồn tại sẽ được giữ nguyên. Giao dịch có id đã tồn tại sẽ được cập nhật theo file CSV; giao dịch mới sẽ được thêm vào.';
 
   @override
-  String get settingsImportContextOnlySubtitle =>
-      'Không ảnh hưởng đến số dư ví.';
+  String get settingsCsvImportConfirmAction => 'Nhập';
 
   @override
-  String get settingsImportReconstructTitle => 'Khôi phục số dư';
+  String get settingsCsvWrongFileType => 'Vui lòng chọn một file .csv.';
 
   @override
-  String get settingsImportReconstructSubtitle =>
-      'Tính vào số dư — chỉ dùng cho ví trống.';
-
-  @override
-  String csvMergeResult(int added, int skipped) {
-    return 'Đã gộp $added giao dịch mới (bỏ qua $skipped).';
+  String csvImportResult(
+      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated) {
+    return '$walletsAdded ví mới ($walletsSkipped bỏ qua), $txnsAdded giao dịch mới, $txnsUpdated giao dịch đã cập nhật.';
   }
-
-  @override
-  String get settingsNonEmptyWalletError =>
-      'Ví đã có giao dịch ảnh hưởng số dư. Chọn \"Chỉ lưu trữ\" hoặc dùng ví trống.';
 
   @override
   String settingsImportFailed(String error) {
     return 'Nhập CSV thất bại: $error';
-  }
-
-  @override
-  String get settingsReplaceConfirmTitle => 'Thay thế toàn bộ dữ liệu?';
-
-  @override
-  String get settingsReplaceConfirmBody =>
-      'Thao tác này sẽ XOÁ toàn bộ ví và giao dịch hiện tại, sau đó khôi phục từ hai file CSV (ví + giao dịch).\n\nKhông thể hoàn tác. Hãy chắc chắn bạn có bản sao lưu.';
-
-  @override
-  String get settingsReplaceConfirmAction => 'Tiếp tục';
-
-  @override
-  String get settingsPickWalletFile => 'Chọn file ví (myfinance_wallets_...)';
-
-  @override
-  String get settingsPickTxnFile => 'Chọn file giao dịch (myfinance_txns_...)';
-
-  @override
-  String csvReplaceResult(int added) {
-    return 'Đã khôi phục $added giao dịch.';
-  }
-
-  @override
-  String settingsRestoreFailed(String error) {
-    return 'Khôi phục thất bại: $error';
   }
 
   @override
@@ -786,4 +746,28 @@ class AppLocalizationsVi extends AppLocalizations {
   @override
   String get captureConfirmDismissConfirmBody =>
       'Thông báo sẽ không tạo giao dịch nào.';
+
+  @override
+  String get notifCaptureChannelName => 'Thông báo giao dịch ngân hàng';
+
+  @override
+  String get notifCaptureChannelDescription =>
+      'Báo khi có giao dịch ngân hàng mới được ghi nhận';
+
+  @override
+  String get notifCaptureTitle => 'Giao dịch ngân hàng mới';
+
+  @override
+  String notifCaptureBody(String amount, String wallet) {
+    return 'Có giao dịch $amount vào $wallet';
+  }
+
+  @override
+  String notifCaptureBodyNoWallet(String amount) {
+    return 'Có giao dịch $amount, chưa xác định ví';
+  }
+
+  @override
+  String get notifCaptureBodyUnparsed =>
+      'Có một thông báo ngân hàng cần bạn xác nhận thủ công';
 }

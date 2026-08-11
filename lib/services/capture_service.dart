@@ -1,8 +1,15 @@
+import '../data/database.dart' show NotificationCapture;
 import '../models/domain.dart';
 import '../repositories/finance_repository.dart';
 import 'bank/bank_notification_parser.dart';
 import 'capture_channel.dart';
+import 'notification_service.dart';
 import 'permission_coordinator.dart';
+
+typedef CaptureNotifier = Future<void> Function(
+  NotificationCapture capture, {
+  String? walletName,
+});
 
 /// Drains the native notification buffer, parses each item, and files
 /// captures into Drift via [FinanceRepository.insertCapture].
@@ -10,12 +17,20 @@ import 'permission_coordinator.dart';
 /// Called on app start and on every [AppLifecycleState.resumed] event.
 /// Wired in [main.dart] via [_AppLifecycleObserver].
 class CaptureService {
-  CaptureService({required FinanceRepository repo, required CaptureChannelApi api})
-      : _repo = repo,
-        _api = api;
+  /// [notify] defaults to the real system-notification popup
+  /// ([NotificationService.showCaptureNotification]); tests inject a fake to
+  /// avoid touching the `flutter_local_notifications` platform channel.
+  CaptureService({
+    required FinanceRepository repo,
+    required CaptureChannelApi api,
+    CaptureNotifier? notify,
+  })  : _repo = repo,
+        _api = api,
+        _notify = notify ?? NotificationService.instance.showCaptureNotification;
 
   final FinanceRepository _repo;
   final CaptureChannelApi _api;
+  final CaptureNotifier _notify;
 
   PermissionCoordinator get permissions => PermissionCoordinator(_api);
 
@@ -38,6 +53,7 @@ class CaptureService {
   Future<void> drain() async {
     // 1. Compute watched packages: BankPackages.all ∪ wallet packageNames.
     final wallets = await _repo.allWallets();
+    final walletNames = {for (final w in wallets) w.id: w.name};
     final walletPkgs = wallets
         .where((w) => w.packageName != null)
         .map((w) => w.packageName!)
@@ -67,7 +83,7 @@ class CaptureService {
 
       if (parsed != null) {
         // Successful parse → file with parsed fields.
-        await _repo.insertCapture(
+        final capture = await _repo.insertCapture(
           packageName: msg.packageName,
           rawTitle: msg.title,
           rawText: msg.text,
@@ -77,12 +93,13 @@ class CaptureService {
           parseStatus:
               parsed.lowConfidence ? ParseStatus.needsReview : ParseStatus.parsed,
         );
+        await _notifyIfNew(capture, walletNames);
       } else if (_rAmountShape.hasMatch(msg.text) ||
           (msg.title != null && _rAmountShape.hasMatch(msg.title!))) {
         // Money-shaped text but parser returned null → probable parser gap.
         // File as unparsed so no bank transaction is ever silently lost
         // (ADR-0013). insertCapture deduplicates, so re-drains are safe.
-        await _repo.insertCapture(
+        final capture = await _repo.insertCapture(
           packageName: msg.packageName,
           rawTitle: msg.title,
           rawText: msg.text,
@@ -91,6 +108,7 @@ class CaptureService {
           direction: null,
           parseStatus: ParseStatus.unparsed,
         );
+        await _notifyIfNew(capture, walletNames);
       }
       // else: no amount shape (OTP, login alert, promo with no monetary value)
       //       → discard. The ID is still included in allIds so the native
@@ -99,5 +117,16 @@ class CaptureService {
 
     // 5. Clear acked IDs from native buffer (after all inserts complete).
     await _api.clearCaptures(allIds);
+  }
+
+  /// Pops the system-notification alert for a freshly inserted capture.
+  /// [capture] is `null` when [FinanceRepository.insertCapture] deduped the
+  /// row — nothing to alert on in that case.
+  Future<void> _notifyIfNew(
+    NotificationCapture? capture,
+    Map<String, String> walletNames,
+  ) async {
+    if (capture == null) return;
+    await _notify(capture, walletName: walletNames[capture.suggestedWalletId]);
   }
 }

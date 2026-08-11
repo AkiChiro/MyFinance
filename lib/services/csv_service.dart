@@ -10,43 +10,80 @@ import 'package:share_plus/share_plus.dart';
 import '../data/database.dart';
 import '../models/domain.dart';
 
-class ImportResult {
-  final int added;
-  final int skipped;
-  const ImportResult(this.added, this.skipped);
+/// Result of [CsvService.importAll], reported to the user as e.g.
+/// "3 ví mới, 42 giao dịch đã nhập".
+class ImportSummary {
+  final int walletsAdded;
+  final int walletsSkipped;
+  final int txnsAdded;
+  final int txnsUpdated;
+  const ImportSummary({
+    required this.walletsAdded,
+    required this.walletsSkipped,
+    required this.txnsAdded,
+    required this.txnsUpdated,
+  });
 }
 
-/// Thrown by [CsvService.importMerge] when [CsvImportMode.reconstructBalance]
-/// is requested but the target wallet already has balance-affecting transactions.
-/// Reconstructing into a non-empty wallet would double-count.
-class NonEmptyWalletReconstructError implements Exception {
-  final String walletId;
-  const NonEmptyWalletReconstructError(this.walletId);
-}
+const _rtMeta = 'META';
+const _rtWallet = 'WALLET';
+const _rtTxn = 'TXN';
+const _rtCategory = 'CATEGORY';
+const _rtSetting = 'SETTING';
+const _rtKeyword = 'KEYWORD';
+const _schemaVersion = '1';
 
+/// Single-file CSV export/import.
+///
+/// The file has no per-section header row — instead every row's first cell
+/// is a record-type discriminator (META/WALLET/TXN/CATEGORY/SETTING/KEYWORD),
+/// so heterogeneous "tables" round-trip through one `CsvToListConverter`
+/// pass. [importAll] only consumes WALLET and TXN rows; CATEGORY/SETTING/
+/// KEYWORD are exported for backup/documentation only.
 class CsvService {
   CsvService(this.db);
   final AppDatabase db;
 
-  /// Exports two CSVs (transactions + wallets) and returns them for the share
-  /// sheet. Includes source and affects_balance columns added in Phase 3.
-  Future<List<XFile>> export() async {
-    final txList = await db.allTxns();
-    final wList = await db.allWallets();
+  /// Exports wallets, transactions, categories, app settings, and the
+  /// keyword library into a single CSV file for the share sheet.
+  ///
+  /// [settingsEntries]/[keywordRules] are passed in by the caller (from
+  /// `AppSettings.exportEntries()` / `CategorySuggester.loadRaw()`) so this
+  /// service only depends on `AppDatabase`, not on the settings/suggester
+  /// service classes themselves.
+  Future<XFile> exportAll({
+    required List<MapEntry<String, String>> settingsEntries,
+    required List<Map<String, dynamic>> keywordRules,
+  }) async {
+    final wallets = await db.allWallets();
+    final txns = await db.allTxns();
+    final categories = await db.allCategories();
 
-    final txRows = <List<dynamic>>[
-      [
-        'id', 'type', 'amount', 'description',
-        'wallet_id', 'wallet_to_id',
-        'wallet_from_name', 'wallet_to_name',
-        'category', 'timestamp', 'imported', 'starred',
-        'source', 'affects_balance',
-      ],
-      for (final t in txList)
+    final rows = <List<dynamic>>[
+      [_rtMeta, 'schema_version', _schemaVersion],
+      [_rtMeta, 'exported_at', DateTime.now().toIso8601String()],
+      for (final w in wallets)
         [
-          t.id, t.type, t.amount, t.description ?? '',
-          t.walletId, t.walletToId ?? '',
-          t.walletFromName ?? '', t.walletToName ?? '',
+          _rtWallet,
+          w.id,
+          w.name,
+          w.initialBalance,
+          w.type,
+          w.packageName ?? '',
+          w.sortOrder,
+          w.balanceCutoffAt ?? '',
+        ],
+      for (final t in txns)
+        [
+          _rtTxn,
+          t.id,
+          t.type,
+          t.amount,
+          t.description ?? '',
+          t.walletId,
+          t.walletToId ?? '',
+          t.walletFromName ?? '',
+          t.walletToName ?? '',
           t.category ?? '',
           t.timestamp.toIso8601String(),
           t.imported ? 1 : 0,
@@ -54,184 +91,121 @@ class CsvService {
           t.source.name,
           t.affectsBalance ? 1 : 0,
         ],
-    ];
-
-    final wRows = <List<dynamic>>[
-      ['id', 'name', 'initial_balance', 'type'],
-      for (final w in wList) [w.id, w.name, w.initialBalance, w.type],
+      for (final c in categories)
+        [
+          _rtCategory,
+          c.id,
+          c.label,
+          c.kind,
+          c.threshold,
+          c.isDefault ? 1 : 0,
+          c.archived ? 1 : 0,
+          c.sortOrder,
+        ],
+      for (final e in settingsEntries) [_rtSetting, e.key, e.value],
+      for (final r in keywordRules)
+        [_rtKeyword, r['keyword'] ?? '', r['category'] ?? '', r['weight'] ?? 0],
     ];
 
     final dir = await getTemporaryDirectory();
     final stamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
-    final txFile = File(p.join(dir.path, 'myfinance_txns_$stamp.csv'));
-    final wFile = File(p.join(dir.path, 'myfinance_wallets_$stamp.csv'));
-
-    await txFile.writeAsString(const ListToCsvConverter().convert(txRows));
-    await wFile.writeAsString(const ListToCsvConverter().convert(wRows));
-
-    return [XFile(txFile.path), XFile(wFile.path)];
+    final file = File(p.join(dir.path, 'myfinance_backup_$stamp.csv'));
+    await file.writeAsString(const ListToCsvConverter().convert(rows));
+    return XFile(file.path);
   }
 
-  /// Merge-by-id import of a transactions CSV. Rows whose id already exists
-  /// are skipped. New rows are stamped [SourceType.csvImport] and [imported=true].
+  /// Imports wallets and transactions from a single unified CSV file.
   ///
-  /// [mode] controls balance participation:
-  /// - [CsvImportMode.contextOnly] (default): rows are archive-only
-  ///   (`affectsBalance=false`). The wallet's current balance is unchanged.
-  /// - [CsvImportMode.reconstructBalance]: rows affect the balance
-  ///   (`affectsBalance=true`). Throws [NonEmptyWalletReconstructError] if any
-  ///   target wallet already has balance-affecting transactions.
-  Future<ImportResult> importMerge(
-    String path, {
-    CsvImportMode mode = CsvImportMode.contextOnly,
-  }) async {
+  /// Wallets: insert-if-absent — a row whose id already exists in the
+  /// database is skipped, so live per-wallet state (`balance_cutoff_at`,
+  /// `sort_order`, `package_name`) is never clobbered by an older export.
+  /// Transactions: upsert by id, applying every column exactly as stored in
+  /// the file (no forced mode — `affects_balance`/`source`/`starred` all
+  /// round-trip faithfully).
+  ///
+  /// CATEGORY/SETTING/KEYWORD/META rows are ignored (export-only sections).
+  Future<ImportSummary> importAll(String path) async {
     final content = await File(path).readAsString();
     final rows = const CsvToListConverter().convert(content);
-    if (rows.length < 2) return const ImportResult(0, 0);
 
-    final header = rows.first.map((e) => e.toString().trim()).toList();
-    final idx = {for (var i = 0; i < header.length; i++) header[i]: i};
+    String cell(List<dynamic> r, int i) => i < r.length ? r[i].toString().trim() : '';
 
-    String cell(List<dynamic> r, String key) {
-      final i = idx[key];
-      if (i == null || i >= r.length) return '';
-      return r[i].toString().trim();
-    }
-
-    final dataRows = rows.skip(1).toList();
-    final allExisting = await db.allTxns();
-    final existingIds = allExisting.map((t) => t.id).toSet();
-
-    if (mode == CsvImportMode.reconstructBalance) {
-      final csvWalletIds = dataRows
-          .map((r) => cell(r, 'wallet_id'))
-          .where((id) => id.isNotEmpty)
-          .toSet();
-      final conflict = allExisting
-          .where((t) => csvWalletIds.contains(t.walletId) && t.affectsBalance)
-          .firstOrNull;
-      if (conflict != null) throw NonEmptyWalletReconstructError(conflict.walletId);
-    }
-
+    var walletsAdded = 0, walletsSkipped = 0;
+    var txnsAdded = 0, txnsUpdated = 0;
     final now = DateTime.now();
-    final affects = mode == CsvImportMode.reconstructBalance;
-    var added = 0, skipped = 0;
 
-    for (final r in dataRows) {
-      final id = cell(r, 'id');
-      if (id.isEmpty || existingIds.contains(id)) {
-        skipped++;
-        continue;
+    await db.transaction(() async {
+      final existingWalletIds = (await db.allWallets()).map((w) => w.id).toSet();
+      final existingTxnIds = (await db.allTxns()).map((t) => t.id).toSet();
+
+      for (final r in rows) {
+        if (r.isEmpty) continue;
+        final recordType = cell(r, 0);
+
+        if (recordType == _rtWallet) {
+          final id = cell(r, 1);
+          if (id.isEmpty) continue;
+          if (existingWalletIds.contains(id)) {
+            walletsSkipped++;
+            continue;
+          }
+          final pkg = cell(r, 5);
+          final cutoff = cell(r, 7);
+          await db.into(db.wallets).insert(WalletsCompanion.insert(
+                id: id,
+                name: cell(r, 2),
+                initialBalance: Value(int.tryParse(cell(r, 3)) ?? 0),
+                type: Value(cell(r, 4).isEmpty ? WalletKinds.cash : cell(r, 4)),
+                packageName: Value(pkg.isEmpty ? null : pkg),
+                sortOrder: Value(int.tryParse(cell(r, 6)) ?? 0),
+                balanceCutoffAt: Value(cutoff.isEmpty ? null : int.tryParse(cutoff)),
+              ));
+          existingWalletIds.add(id);
+          walletsAdded++;
+        } else if (recordType == _rtTxn) {
+          final id = cell(r, 1);
+          if (id.isEmpty) continue;
+          final desc = cell(r, 4);
+          final toId = cell(r, 6);
+          final fromName = cell(r, 7);
+          final toName = cell(r, 8);
+          final cat = cell(r, 9);
+          final ts = DateTime.tryParse(cell(r, 10)) ?? now;
+          final source = SourceType.values
+              .firstWhere((s) => s.name == cell(r, 13), orElse: () => SourceType.csvImport);
+
+          await db.into(db.txns).insertOnConflictUpdate(TxnsCompanion.insert(
+                id: id,
+                type: cell(r, 2).isEmpty ? TxTypes.spending : cell(r, 2),
+                amount: int.tryParse(cell(r, 3)) ?? 0,
+                description: Value(desc.isEmpty ? null : desc),
+                walletId: cell(r, 5),
+                walletToId: Value(toId.isEmpty ? null : toId),
+                walletFromName: Value(fromName.isEmpty ? null : fromName),
+                walletToName: Value(toName.isEmpty ? null : toName),
+                category: Value(cat.isEmpty ? null : cat),
+                timestamp: ts,
+                createdAt: now,
+                imported: Value(cell(r, 11) == '1'),
+                starred: Value(cell(r, 12) == '1'),
+                source: Value(source),
+                affectsBalance: Value(cell(r, 14) == '1'),
+              ));
+          if (existingTxnIds.add(id)) {
+            txnsAdded++;
+          } else {
+            txnsUpdated++;
+          }
+        }
+        // else: META/CATEGORY/SETTING/KEYWORD — export-only, ignored on import.
       }
-      final type = cell(r, 'type');
-      final amount = int.tryParse(cell(r, 'amount')) ?? 0;
-      final ts = DateTime.tryParse(cell(r, 'timestamp')) ?? now;
-      final desc = cell(r, 'description');
-      final toId = cell(r, 'wallet_to_id');
-      final cat = cell(r, 'category');
-      final fromName = cell(r, 'wallet_from_name');
-      final toName = cell(r, 'wallet_to_name');
+    });
 
-      await db.into(db.txns).insert(TxnsCompanion.insert(
-            id: id,
-            type: type.isEmpty ? 'spending' : type,
-            amount: amount,
-            description: Value(desc.isEmpty ? null : desc),
-            walletId: cell(r, 'wallet_id'),
-            walletToId: Value(toId.isEmpty ? null : toId),
-            walletFromName: Value(fromName.isEmpty ? null : fromName),
-            walletToName: Value(toName.isEmpty ? null : toName),
-            category: Value(cat.isEmpty ? null : cat),
-            timestamp: ts,
-            createdAt: now,
-            imported: const Value(true),
-            source: const Value(SourceType.csvImport),
-            affectsBalance: Value(affects),
-          ));
-      existingIds.add(id);
-      added++;
-    }
-    return ImportResult(added, skipped);
-  }
-
-  /// Full restore: delete all local data then insert wallets + transactions
-  /// from the given CSV paths. Transactions are stamped [SourceType.csvImport]
-  /// with [affectsBalance=true] — they restore full balance participation.
-  Future<ImportResult> importReplace(
-      String walletsPath, String txnsPath) async {
-    await db.delete(db.txns).go();
-    await db.delete(db.wallets).go();
-
-    // ── Wallets ──────────────────────────────────────────────────────────────
-    final wContent = await File(walletsPath).readAsString();
-    final wRows = const CsvToListConverter().convert(wContent);
-    if (wRows.length >= 2) {
-      final wHeader = wRows.first.map((e) => e.toString().trim()).toList();
-      final wIdx = {for (var i = 0; i < wHeader.length; i++) wHeader[i]: i};
-      String wcell(List<dynamic> r, String key) {
-        final i = wIdx[key];
-        if (i == null || i >= r.length) return '';
-        return r[i].toString().trim();
-      }
-
-      for (final r in wRows.skip(1)) {
-        final id = wcell(r, 'id');
-        if (id.isEmpty) continue;
-        await db.into(db.wallets).insertOnConflictUpdate(WalletsCompanion(
-          id: Value(id),
-          name: Value(wcell(r, 'name')),
-          initialBalance: Value(int.tryParse(wcell(r, 'initial_balance')) ?? 0),
-          type: Value(wcell(r, 'type')),
-        ));
-      }
-    }
-
-    // ── Transactions ─────────────────────────────────────────────────────────
-    final tContent = await File(txnsPath).readAsString();
-    final tRows = const CsvToListConverter().convert(tContent);
-    if (tRows.length < 2) return const ImportResult(0, 0);
-
-    final tHeader = tRows.first.map((e) => e.toString().trim()).toList();
-    final tIdx = {for (var i = 0; i < tHeader.length; i++) tHeader[i]: i};
-    String tcell(List<dynamic> r, String key) {
-      final i = tIdx[key];
-      if (i == null || i >= r.length) return '';
-      return r[i].toString().trim();
-    }
-
-    final now = DateTime.now();
-    var added = 0;
-    for (final r in tRows.skip(1)) {
-      final id = tcell(r, 'id');
-      if (id.isEmpty) continue;
-      final type = tcell(r, 'type');
-      final amount = int.tryParse(tcell(r, 'amount')) ?? 0;
-      final ts = DateTime.tryParse(tcell(r, 'timestamp')) ?? now;
-      final desc = tcell(r, 'description');
-      final toId = tcell(r, 'wallet_to_id');
-      final cat = tcell(r, 'category');
-      final fromName = tcell(r, 'wallet_from_name');
-      final toName = tcell(r, 'wallet_to_name');
-      final starred = tcell(r, 'starred') == '1';
-
-      await db.into(db.txns).insertOnConflictUpdate(TxnsCompanion.insert(
-            id: id,
-            type: type.isEmpty ? 'spending' : type,
-            amount: amount,
-            description: Value(desc.isEmpty ? null : desc),
-            walletId: tcell(r, 'wallet_id'),
-            walletToId: Value(toId.isEmpty ? null : toId),
-            walletFromName: Value(fromName.isEmpty ? null : fromName),
-            walletToName: Value(toName.isEmpty ? null : toName),
-            category: Value(cat.isEmpty ? null : cat),
-            starred: Value(starred),
-            timestamp: ts,
-            createdAt: now,
-            source: const Value(SourceType.csvImport),
-            affectsBalance: const Value(true),
-          ));
-      added++;
-    }
-    return ImportResult(added, 0);
+    return ImportSummary(
+      walletsAdded: walletsAdded,
+      walletsSkipped: walletsSkipped,
+      txnsAdded: txnsAdded,
+      txnsUpdated: txnsUpdated,
+    );
   }
 }

@@ -166,6 +166,12 @@ A wallet can be associated with a bank app's package name. When a notification a
 **ADR-0017 — Deferred capture model (file-then-clear)**
 `CaptureService.drain()` inserts all captures into Drift before calling `clearCaptures()` on the native buffer. Crash between these two steps causes a re-drain on next launch; `insertCapture`'s 2-minute dedup window makes re-draining idempotent.
 
+**ADR-0018 — "Bỏ qua" capture-alert action dismisses via a background-isolate `AppDatabase`, not by opening the app**
+The alternative (briefly open the app, run the dismiss, show nothing) is simpler and was offered to the user as the recommended default, but the user explicitly chose the silent background path. flutter_local_notifications runs a `showsUserInterface: false` action's callback in its own separate Flutter engine, which Android already plugin-registers, so a throwaway `AppDatabase()` opened there works — the existing `NativeDatabase.createInBackground` means this is just another connection to the same sqlite file. The tradeoff: writes made this way are invisible to the live app's Drift reactive streams until something calls `markTablesUpdated` on the live connection, which is why `_AppLifecycleObserver` now does that on every resume regardless of whether `drain()` found anything.
+
+**ADR-0019 — Single CSV file, record-type-discriminator rows, instead of per-entity files/headers**
+Once export needed to cover wallets + transactions + categories + settings + keyword rules (all different column shapes) in one file, a per-section-header format (like a multi-sheet spreadsheet) would need custom line-splitting to parse. Prefixing every row with a type tag (`WALLET,...` / `TXN,...` / ...) instead lets the whole file go through one `CsvToListConverter`/`ListToCsvConverter` pass — rows are just grouped by `row[0]` after parsing. Chosen over keeping multiple files (harder to share as one backup) or switching export to JSON (user asked for CSV specifically).
+
 ---
 
 ## Device testing results (Phase 5, V0.2-Improve branch)
@@ -442,3 +448,63 @@ Three bundled features, planned together and landed as one session: (1) real vi/
 | `lib/ui/wallets_page.dart` | Split into `_WalletsList`/`_Empty` + `AnimatedSwitcher`; hero card + recent-activity preview wired in; new wallet-type icons |
 | `lib/ui/transactions_page.dart` | `_TxnTile` category-color icon (amount stays semantic); `_TxnsEmpty` + `AnimatedSwitcher` |
 | `lib/ui/theme_customization_page.dart` | New "Biểu tượng" section; `_resetAll()` clears icon slots too |
+
+---
+
+## Session 9 — Bank capture system notification + unified CSV export/import (Branch: V0.2-Improve)
+
+Two independent business-logic changes, planned together.
+
+### 1. Bank capture system notification
+
+**Problem:** a captured bank notification only ever showed up inside the app (badge, banner, `CapturesPage` inbox). The user has to have the app open to notice a new bank transaction needs confirming.
+
+**Solution:** `CaptureService.drain()` now pops a real Android notification for every newly inserted capture, via a new `NotificationService.showCaptureNotification(capture, {walletName})` on a dedicated channel (`myfinance_capture_alert_v1`, distinct from the quiet persistent quick-add channel). Body text is "Có giao dịch {+/-amount} vào {wallet}" (via `formatSigned` from `lib/format.dart`), or a generic manual-review message for `ParseStatus.unparsed` captures with no amount. Two actions:
+
+- **Thêm** (`showsUserInterface: true`): routed through the existing foreground `NotificationResponse` callback — the same mechanism the persistent quick-add notification already uses reliably across cold starts. `main.dart` wires `NotificationService.instance.onOpenCapture = (id) async { ... }` to fetch the capture via a new `FinanceRepository.captureById(id)` and push `CaptureConfirmPage`.
+- **Bỏ qua** (`showsUserInterface: false`, per explicit user choice over a simpler "briefly opens the app" alternative): never opens the app UI. flutter_local_notifications runs this callback in its own **separate Flutter engine** (already plugin-registered on Android, per the plugin's README), so `_onResponseBackground` in `notification_service.dart` instantiates a throwaway `AppDatabase()` — safe, since the database already opens via `NativeDatabase.createInBackground`, so this is just another connection to the same sqlite file — and writes the dismissal directly, without ever bringing the app forward.
+
+**Cross-isolate staleness fix:** since the dismiss write happens through a different `AppDatabase`/`QueryExecutor` instance than the live app's, Drift's reactive `watch()` streams don't see it automatically. `_AppLifecycleObserver.didChangeAppLifecycleState` (`main.dart`) now calls `db.markTablesUpdated({db.notificationCaptures})` on every `resumed`, alongside the existing `captureService.drain()` call, so the badge/banner/`CapturesPage` refresh correctly after a background dismiss.
+
+**Testability:** `CaptureService`'s constructor gained an optional `notify: CaptureNotifier?` parameter (defaults to `NotificationService.instance.showCaptureNotification`). Without this, `drain()`'s new notification call would hit the `flutter_local_notifications` platform channel, which throws "Binding has not yet been initialized" in the existing pure-Dart `capture_drain_test.dart` suite (no `TestWidgetsFlutterBinding`). Tests now inject a no-op fake.
+
+**Files changed:** `lib/services/notification_service.dart` (new channel, actions, `showCaptureNotification`, `_onResponseBackground`, `onOpenCapture` callback), `lib/services/capture_service.dart` (`CaptureNotifier` typedef + DI, `_notifyIfNew` helper), `lib/repositories/finance_repository.dart` (`captureById`), `lib/main.dart` (`onOpenCapture` wiring, `_AppLifecycleObserver` gained a `db` reference for the resume nudge), `lib/l10n/app_vi.arb`/`app_en.arb` (6 new `notifCapture*` keys), `test/capture_drain_test.dart` (inject fake `notify`).
+
+### 2. Unified CSV export/import
+
+**Problem:** export produced two separate files (wallets.csv, txns.csv); import offered two flows — `importMerge` with a `contextOnly`/`reconstructBalance` mode picker, and a destructive two-file `importReplace`. The `reconstructBalance` mode's `NonEmptyWalletReconstructError` guard (import into a non-empty wallet was rejected) existed to prevent double-counting balance — a concern schema v7's `balance_cutoff_at` (Session 7) already made moot, since each wallet's balance is self-contained regardless of transaction provenance. The wallet export also silently dropped `package_name`/`sort_order`/`balance_cutoff_at`, so `importReplace` restores lost bank-links/order/cutoffs — a latent bug.
+
+**Solution:** `CsvService` now has exactly two methods, `exportAll()` and `importAll()`, writing/reading **one** CSV file. Since heterogeneous "tables" don't share a column schema, every row's first cell is a record-type discriminator instead of a per-section header:
+
+```
+META,schema_version,exported_at
+WALLET,id,name,initial_balance,type,package_name,sort_order,balance_cutoff_at
+TXN,id,type,amount,description,wallet_id,wallet_to_id,wallet_from_name,wallet_to_name,category,timestamp,imported,starred,source,affects_balance
+CATEGORY,id,label,kind,threshold,is_default,archived,sort_order
+SETTING,key,value
+KEYWORD,keyword,category,weight
+```
+
+`exportAll({settingsEntries, keywordRules})` writes all six row types — wallets/transactions/categories come from `AppDatabase`; `settingsEntries` (new `AppSettings.exportEntries(kIconSlots)`) and `keywordRules` (`CategorySuggester.loadRaw()`) are passed in by `SettingsPage` so `CsvService` stays dependency-free of the settings/suggester service classes.
+
+`importAll(path)` reads **wallets + transactions only** — CATEGORY/SETTING/KEYWORD/META rows are export-only (backup/documentation), parsed and ignored on import, per explicit user scoping. There is no mode picker — merge semantics (confirmed with the user):
+- **Wallets**: insert-if-absent. A row whose `id` already exists in the database is skipped — the existing wallet always wins, so live `balance_cutoff_at`/`sort_order`/`package_name` are never clobbered by an older export.
+- **Transactions**: upsert by `id` (`insertOnConflictUpdate`), applying every column exactly as stored in the file (no forced mode — `affects_balance`/`source`/`starred` all round-trip faithfully). Re-importing the same file is idempotent.
+
+Returns `ImportSummary(walletsAdded, walletsSkipped, txnsAdded, txnsUpdated)` for the settings-page result snackbar.
+
+**Removed:** `CsvImportMode` enum (`lib/models/domain.dart`), `NonEmptyWalletReconstructError`, the old `export()`/`importMerge()`/`importReplace()`, the "Merge"/"Replace" tiles and mode-picker dialog in `SettingsPage` (replaced by one "Nhập CSV" tile with a lightweight non-destructive confirm dialog).
+
+**Files changed:** `lib/services/csv_service.dart` (rewritten), `lib/services/app_settings.dart` (`exportEntries`), `lib/models/domain.dart` (removed `CsvImportMode`), `lib/ui/settings_page.dart` (`_export`/`_import`, single-tile UI), `lib/l10n/app_vi.arb`/`app_en.arb` (CSV section keys consolidated), `test/csv_import_test.dart` (rewritten against `importAll`: fresh import, idempotent re-import, existing-wallet-preserved, existing-txn-updated, export-only-rows-ignored).
+
+### Verification
+
+`flutter analyze`: 0 new issues (2 pre-existing `use_build_context_synchronously` infos in `quick_add_page.dart`, unrelated). `flutter test`: all tests pass except 3 pre-existing failures already present before this session and unrelated to it — `test/balance_test.dart` and `test/auto_star_test.dart` fail to *load* (missing `sortOrder` argument, from the still-uncommitted Session 7 work) and one stale `test/sql_analytics_test.dart` assertion against the pre-Session-7 `affects_balance`-gated analytics behavior. Confirmed via `git diff`/`flutter analyze` output that none of these three are touched or newly caused by this session — see Session 8's "Verification" section for the same three, first observed there.
+
+On-device testing (notification popup, cold-start "Thêm"/"Bỏ qua", CSV round-trip on a real device) was **not** performed as part of this session — flagged for the user to verify per the project's usual on-device test checklist.
+
+### On-device follow-up — CSV file picker couldn't select files from Google Drive
+
+**Problem:** on first real-device test, tapping a `.csv` file listed under a Google Drive location in the system file picker did nothing — the file appeared greyed out/unselectable. This was **not new** in this session; the picker call (`FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'])`) was carried over unchanged from the old `_importMerge`/`_importReplace` flows. `FileType.custom` + `allowedExtensions` asks Android's Storage Access Framework document picker to filter by MIME type; cloud-provider-listed files (Google Drive here) frequently don't report the exact MIME type the filter expects, so SAF disables them even though the extension is correct — a well-known `file_picker`/Android limitation, not an app logic bug.
+
+**Fix:** `lib/ui/settings_page.dart`'s `_import()` now calls `FilePicker.platform.pickFiles(type: FileType.any)` (no MIME filter, so every file stays selectable regardless of provider-reported MIME type) and validates the `.csv` extension in code afterward, showing `l10n.settingsCsvWrongFileType` if it doesn't match.

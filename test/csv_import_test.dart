@@ -1,15 +1,12 @@
 import 'dart:io';
 
+import 'package:csv/csv.dart';
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myfinance/data/database.dart';
-import 'package:myfinance/models/domain.dart';
 import 'package:myfinance/repositories/finance_repository.dart';
 import 'package:myfinance/services/csv_service.dart';
-
-const _kCsvHeader =
-    'id,type,amount,description,wallet_id,wallet_to_id,'
-    'wallet_from_name,wallet_to_name,category,timestamp,imported,starred';
 
 void main() {
   late Directory tempDir;
@@ -29,77 +26,139 @@ void main() {
     tempDir.deleteSync(recursive: true);
   });
 
-  File writeCsv(String content) {
+  File writeCsv(List<List<dynamic>> rows) {
     final f = File('${tempDir.path}/import.csv');
-    f.writeAsStringSync(content);
+    f.writeAsStringSync(const ListToCsvConverter().convert(rows));
     return f;
   }
 
-  group('importMerge', () {
-    test('context-only: rows get affectsBalance=false and balance is unchanged',
-        () async {
-      await repo.addWallet(name: 'Cash', initialBalance: 500000);
-      final wallet = (await db.allWallets()).first;
+  List<dynamic> walletRow(String id, String name, int initialBalance) =>
+      ['WALLET', id, name, initialBalance, 'cash', '', 0, ''];
 
-      final f = writeCsv('$_kCsvHeader\r\n'
-          'csv1,spending,100000,,${wallet.id},,,,,2024-01-01T00:00:00.000,0,0\r\n');
+  List<dynamic> txnRow(
+    String id, {
+    required String type,
+    required int amount,
+    required String walletId,
+    String description = '',
+    String timestamp = '2024-01-01T00:00:00.000',
+    bool affectsBalance = true,
+  }) =>
+      [
+        'TXN', id, type, amount, description, walletId, '', '', '', '',
+        timestamp, 0, 0, 'csvImport', affectsBalance ? 1 : 0,
+      ];
 
-      final result =
-          await csv.importMerge(f.path, mode: CsvImportMode.contextOnly);
+  group('importAll', () {
+    test('imports wallets and transactions into an empty database', () async {
+      final f = writeCsv([
+        walletRow('w1', 'Cash', 500000),
+        txnRow('t1', type: 'earning', amount: 300000, walletId: 'w1'),
+        txnRow('t2', type: 'spending', amount: 50000, walletId: 'w1',
+            timestamp: '2024-01-02T00:00:00.000'),
+      ]);
 
-      expect(result.added, 1);
-      final txns = await db.allTxns();
-      expect(txns.length, 1);
-      expect(txns.first.source, SourceType.csvImport);
-      expect(txns.first.affectsBalance, isFalse,
-          reason: 'context-only rows must not affect balance');
-      expect(txns.first.imported, isTrue);
+      final result = await csv.importAll(f.path);
 
-      // Balance unchanged — context-only row is excluded
-      expect(repo.balanceOf(wallet, txns), 500000);
-    });
+      expect(result.walletsAdded, 1);
+      expect(result.walletsSkipped, 0);
+      expect(result.txnsAdded, 2);
+      expect(result.txnsUpdated, 0);
 
-    test('reconstruct-balance: rows get affectsBalance=true and balance reflects imports',
-        () async {
-      await repo.addWallet(name: 'Fresh', initialBalance: 0);
-      final wallet = (await db.allWallets()).first;
-
-      final f = writeCsv('$_kCsvHeader\r\n'
-          'csv1,earning,300000,,${wallet.id},,,,,2024-01-01T00:00:00.000,0,0\r\n'
-          'csv2,spending,50000,,${wallet.id},,,,,2024-01-02T00:00:00.000,0,0\r\n');
-
-      await csv.importMerge(f.path, mode: CsvImportMode.reconstructBalance);
+      final wallet = (await db.allWallets()).single;
+      expect(wallet.name, 'Cash');
+      expect(wallet.initialBalance, 500000);
 
       final txns = await db.allTxns();
       expect(txns.length, 2);
-      expect(txns.every((t) => t.affectsBalance), isTrue,
-          reason: 'reconstruct-balance rows must affect balance');
-      expect(txns.every((t) => t.source == SourceType.csvImport), isTrue);
-
-      // balance = 0 (initial) + 300000 (earning) - 50000 (spending) = 250000
-      expect(repo.balanceOf(wallet, txns), 250000);
+      expect(repo.balanceOf(wallet, txns), 750000);
     });
 
-    test('reconstruct-balance: throws NonEmptyWalletReconstructError for non-empty wallet',
+    test('re-importing the same file is idempotent', () async {
+      final f = writeCsv([
+        walletRow('w1', 'Cash', 500000),
+        txnRow('t1', type: 'earning', amount: 300000, walletId: 'w1'),
+      ]);
+
+      await csv.importAll(f.path);
+      final result2 = await csv.importAll(f.path);
+
+      expect(result2.walletsAdded, 0);
+      expect(result2.walletsSkipped, 1);
+      expect(result2.txnsAdded, 0);
+      expect(result2.txnsUpdated, 1);
+
+      expect((await db.allWallets()).length, 1);
+      expect((await db.allTxns()).length, 1);
+    });
+
+    test('existing wallet with a matching id is preserved, not overwritten',
         () async {
-      await repo.addWallet(name: 'Existing', initialBalance: 200000);
-      final wallet = (await db.allWallets()).first;
+      await db.into(db.wallets).insert(WalletsCompanion.insert(
+            id: 'w-fixed',
+            name: 'Original',
+            initialBalance: const Value(100),
+          ));
 
-      // Add a native (affectsBalance=true) transaction
-      await repo.addSpending(
-        walletId: wallet.id,
-        amount: 50000,
-        category: 'food',
-        timestamp: DateTime(2024),
-      );
+      final f = writeCsv([walletRow('w-fixed', 'Imported', 999999)]);
+      final result = await csv.importAll(f.path);
 
-      final f = writeCsv('$_kCsvHeader\r\n'
-          'csv_new,spending,10000,,${wallet.id},,,,,2024-01-01T00:00:00.000,0,0\r\n');
+      expect(result.walletsAdded, 0);
+      expect(result.walletsSkipped, 1);
+      final wallet = await db.walletById('w-fixed');
+      expect(wallet!.name, 'Original');
+      expect(wallet.initialBalance, 100);
+    });
 
-      await expectLater(
-        csv.importMerge(f.path, mode: CsvImportMode.reconstructBalance),
-        throwsA(isA<NonEmptyWalletReconstructError>()),
-      );
+    test('existing transaction with a matching id is updated from the CSV',
+        () async {
+      await db.into(db.wallets).insert(WalletsCompanion.insert(
+            id: 'w1',
+            name: 'Cash',
+            initialBalance: const Value(0),
+          ));
+      await db.into(db.txns).insert(TxnsCompanion.insert(
+            id: 't-fixed',
+            type: 'spending',
+            amount: 100,
+            walletId: 'w1',
+            timestamp: DateTime(2024),
+            createdAt: DateTime(2024),
+            description: const Value('old'),
+          ));
+
+      final f = writeCsv([
+        txnRow('t-fixed',
+            type: 'spending', amount: 200000, walletId: 'w1',
+            description: 'updated'),
+      ]);
+      final result = await csv.importAll(f.path);
+
+      expect(result.txnsAdded, 0);
+      expect(result.txnsUpdated, 1);
+      final txn = (await db.allTxns()).single;
+      expect(txn.amount, 200000);
+      expect(txn.description, 'updated');
+    });
+
+    test('CATEGORY/SETTING/KEYWORD/META rows are ignored without error',
+        () async {
+      final f = writeCsv([
+        ['META', 'schema_version', '1'],
+        ['CATEGORY', 'fake', 'Fake', 'spending', 0, 0, 0, 0],
+        ['SETTING', 'ui.locale', 'vi'],
+        ['KEYWORD', 'cà phê', 'food', 10],
+      ]);
+
+      final result = await csv.importAll(f.path);
+
+      expect(result.walletsAdded, 0);
+      expect(result.txnsAdded, 0);
+      expect(await db.allWallets(), isEmpty);
+      expect(await db.allTxns(), isEmpty);
+      // The fake CSV category row must not have been written to the DB.
+      final categories = await db.allCategories();
+      expect(categories.any((c) => c.id == 'fake'), isFalse);
     });
   });
 }

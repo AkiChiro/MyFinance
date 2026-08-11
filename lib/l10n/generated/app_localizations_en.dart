@@ -412,24 +412,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsCsvExportSubtitle =>
-      'Share/save transactions and wallets to a CSV file.';
+      'Save wallets, transactions, categories, appearance, and suggestion keywords to a single CSV file.';
 
   @override
-  String get settingsCsvShareSubject => 'MyFinance — CSV backup';
+  String get settingsCsvShareSubject => 'MyFinance — CSV backup.csv';
 
   @override
-  String get settingsCsvMergeTitle => 'Import CSV (merge)';
+  String get settingsCsvImportTitle => 'Import CSV';
 
   @override
-  String get settingsCsvMergeSubtitle =>
-      'Merged by id. Imported transactions are history only — they do not count toward balance or analytics.';
-
-  @override
-  String get settingsCsvReplaceTitle => 'Import CSV (replace all)';
-
-  @override
-  String get settingsCsvReplaceSubtitle =>
-      'Deletes all current data and restores from CSV. Requires two files: wallets, then transactions.';
+  String get settingsCsvImportSubtitle =>
+      'Import wallets and transactions from a CSV file. Wallets with a matching id are kept as-is; transactions with a matching id are updated.';
 
   @override
   String get settingsKeywordLibraryTitle => 'Keyword library';
@@ -462,62 +455,27 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsImportModeTitle => 'Choose import mode';
+  String get settingsCsvImportConfirmTitle => 'Import data from CSV?';
 
   @override
-  String get settingsImportContextOnlyTitle => 'Archive only';
+  String get settingsCsvImportConfirmBody =>
+      'Wallets with an id that already exists are kept as-is. Transactions with an id that already exists are updated from the CSV file; new ones are added.';
 
   @override
-  String get settingsImportContextOnlySubtitle =>
-      'Does not affect wallet balances.';
+  String get settingsCsvImportConfirmAction => 'Import';
 
   @override
-  String get settingsImportReconstructTitle => 'Restore balance';
+  String get settingsCsvWrongFileType => 'Please choose a .csv file.';
 
   @override
-  String get settingsImportReconstructSubtitle =>
-      'Counts toward balance — use only for empty wallets.';
-
-  @override
-  String csvMergeResult(int added, int skipped) {
-    return 'Merged $added new transactions (skipped $skipped).';
+  String csvImportResult(
+      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated) {
+    return '$walletsAdded new wallets ($walletsSkipped skipped), $txnsAdded new transactions, $txnsUpdated updated.';
   }
-
-  @override
-  String get settingsNonEmptyWalletError =>
-      'The wallet already has balance-affecting transactions. Choose \"Archive only\" or use an empty wallet.';
 
   @override
   String settingsImportFailed(String error) {
     return 'CSV import failed: $error';
-  }
-
-  @override
-  String get settingsReplaceConfirmTitle => 'Replace all data?';
-
-  @override
-  String get settingsReplaceConfirmBody =>
-      'This will DELETE all current wallets and transactions, then restore from two CSV files (wallets + transactions).\n\nThis cannot be undone. Make sure you have a backup.';
-
-  @override
-  String get settingsReplaceConfirmAction => 'Continue';
-
-  @override
-  String get settingsPickWalletFile =>
-      'Choose the wallets file (myfinance_wallets_...)';
-
-  @override
-  String get settingsPickTxnFile =>
-      'Choose the transactions file (myfinance_txns_...)';
-
-  @override
-  String csvReplaceResult(int added) {
-    return 'Restored $added transactions.';
-  }
-
-  @override
-  String settingsRestoreFailed(String error) {
-    return 'Restore failed: $error';
   }
 
   @override
@@ -790,4 +748,28 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get captureConfirmDismissConfirmBody =>
       'No transaction will be created.';
+
+  @override
+  String get notifCaptureChannelName => 'Bank transaction alerts';
+
+  @override
+  String get notifCaptureChannelDescription =>
+      'Alerts when a new bank transaction is captured';
+
+  @override
+  String get notifCaptureTitle => 'New bank transaction';
+
+  @override
+  String notifCaptureBody(String amount, String wallet) {
+    return 'Transaction $amount to $wallet';
+  }
+
+  @override
+  String notifCaptureBodyNoWallet(String amount) {
+    return 'Transaction $amount, wallet not set';
+  }
+
+  @override
+  String get notifCaptureBodyUnparsed =>
+      'A bank notification needs your manual confirmation';
 }

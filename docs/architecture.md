@@ -185,6 +185,19 @@ FinanceRepository.insertCapture()
   ─ writes NotificationCaptures row
         │
         ▼
+NotificationService.showCaptureNotification(capture, walletName)  [drain(), per new row]
+  ─ system notification: "Có giao dịch +/-X vào [wallet]" (or a generic
+    manual-review message for unparsed captures)
+  ─ actions: "Thêm" (showsUserInterface: true) / "Bỏ qua" (showsUserInterface: false)
+        │
+        ├─ tap body or "Thêm" → app opens (or resumes) → onOpenCapture(captureId)
+        │                        → CaptureConfirmPage(capture)
+        │
+        └─ "Bỏ qua" → _onResponseBackground isolate → dismissCapture(captureId)
+                        directly against a throwaway AppDatabase connection,
+                        without ever bringing the app UI forward
+        │
+        ▼
 CapturesPage / badge / banner  [reactive via watchPendingCaptures()]
         │
   (user taps capture)
@@ -201,6 +214,15 @@ FinanceRepository.confirmCapture()
     2. INSERT txns (source=bankNotification, affectsBalance=true)
     3. UPDATE notification_captures SET status=confirmed, resulting_txn_id=...
 ```
+
+### Capture alert notification (ADR — background-isolate dismiss)
+
+`CaptureService.drain()` pops a one-shot Android notification for every newly inserted capture (a `CaptureNotifier` callback, `NotificationService.instance.showCaptureNotification` by default — injectable so tests don't touch the `flutter_local_notifications` platform channel). It uses its own channel (`myfinance_capture_alert_v1`, distinct from the quiet persistent quick-add channel) with two actions:
+
+- **Thêm** (`showsUserInterface: true`) — routed through the existing foreground `NotificationResponse` callback (same mechanism the persistent notification already uses across cold starts). `main.dart` wires `NotificationService.instance.onOpenCapture` to fetch the capture (`FinanceRepository.captureById`) and push `CaptureConfirmPage`.
+- **Bỏ qua** (`showsUserInterface: false`) — never opens the app. flutter_local_notifications runs this in its own **separate Flutter engine** (see the plugin's README — Android auto-registers plugins for it, unlike iOS), so `_onResponseBackground` in `notification_service.dart` can safely instantiate a throwaway `AppDatabase()` (the database already uses `NativeDatabase.createInBackground`, so this is just another connection to the same sqlite file) and write the dismissal directly.
+
+Because that write happens through a *different* `AppDatabase`/`QueryExecutor` instance than the live app's, Drift's reactive `watch()` streams don't see it automatically — Drift only pushes updates within the same connection, not by watching the file. Fix: `_AppLifecycleObserver.didChangeAppLifecycleState` (`main.dart`) calls `db.markTablesUpdated({db.notificationCaptures})` on every `resumed`, in addition to the existing `captureService.drain()` call, forcing any live watchers (badge, banner, `CapturesPage`) to re-query.
 
 ## Pigeon channel (`CaptureChannelApi`)
 
@@ -238,8 +260,25 @@ Flutter-side wrapper for `flutter_local_notifications`. Creates and manages a pe
 
 ### `CsvService`
 
-- Export: produces two CSV files (transactions + wallets) and shares them via `share_plus`.
-- Import: parses a CSV, resolves wallets by name (with snapshot name fallback), inserts transactions with `source=csvImport` and respects the user-chosen `CsvImportMode` for `affectsBalance`.
+Single-file CSV export/import (`lib/services/csv_service.dart`). There is no per-section header row — every row's **first cell is a record-type discriminator** (`META`/`WALLET`/`TXN`/`CATEGORY`/`SETTING`/`KEYWORD`), so heterogeneous "tables" round-trip through one `CsvToListConverter`/`ListToCsvConverter` pass:
+
+```
+META,schema_version,exported_at
+WALLET,id,name,initial_balance,type,package_name,sort_order,balance_cutoff_at
+TXN,id,type,amount,description,wallet_id,wallet_to_id,wallet_from_name,wallet_to_name,category,timestamp,imported,starred,source,affects_balance
+CATEGORY,id,label,kind,threshold,is_default,archived,sort_order
+SETTING,key,value
+KEYWORD,keyword,category,weight
+```
+
+**`exportAll({settingsEntries, keywordRules})`** — one `XFile`. Wallets/transactions/categories come from `AppDatabase`; `settingsEntries` (`AppSettings.exportEntries(kIconSlots)`) and `keywordRules` (`CategorySuggester.loadRaw()`) are passed in by the caller (`SettingsPage`) so `CsvService` itself only depends on `AppDatabase`. CATEGORY/SETTING/KEYWORD rows exist for backup/documentation only — they are not re-imported (see below).
+
+**`importAll(path)`** — reads **wallets + transactions only**; META/CATEGORY/SETTING/KEYWORD rows are parsed and ignored. Merge semantics (chosen because balance no longer depends on wallet emptiness — see `balance_cutoff_at` below):
+- **Wallets**: insert-if-absent. A row whose `id` already exists in the database is skipped entirely — the existing wallet (and its live `balance_cutoff_at`/`sort_order`/`package_name`) always wins over an older export.
+- **Transactions**: upsert by `id` (`insertOnConflictUpdate`), applying every column exactly as stored in the file — `source`/`affects_balance`/`starred`/`imported` all round-trip faithfully. Re-importing the same file (or an overlapping backup) is idempotent.
+- Returns an `ImportSummary` (`walletsAdded`, `walletsSkipped`, `txnsAdded`, `txnsUpdated`) for the settings-page result snackbar.
+
+This replaced an earlier two-file (wallets.csv + txns.csv), two-mode (`contextOnly`/`reconstructBalance`) design. That design's `NonEmptyWalletReconstructError` guard existed to stop a "restore balance" import from double-counting into a wallet that already had transactions — a concern schema v7's `balance_cutoff_at` (per-wallet cutoff timestamp) made moot, since a wallet's balance is self-contained regardless of transaction provenance. Both are gone; there is no import mode to choose anymore.
 
 ### `PermissionCoordinator`
 

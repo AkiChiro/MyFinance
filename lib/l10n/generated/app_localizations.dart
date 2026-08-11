@@ -815,7 +815,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsCsvExportSubtitle.
   ///
   /// In vi, this message translates to:
-  /// **'Chia sẻ/lưu giao dịch và ví ra file CSV.'**
+  /// **'Lưu ví, giao dịch, danh mục, giao diện và từ khoá gợi ý ra một file CSV.'**
   String get settingsCsvExportSubtitle;
 
   /// No description provided for @settingsCsvShareSubject.
@@ -824,29 +824,17 @@ abstract class AppLocalizations {
   /// **'MyFinance — sao lưu CSV'**
   String get settingsCsvShareSubject;
 
-  /// No description provided for @settingsCsvMergeTitle.
+  /// No description provided for @settingsCsvImportTitle.
   ///
   /// In vi, this message translates to:
-  /// **'Nhập CSV (gộp)'**
-  String get settingsCsvMergeTitle;
+  /// **'Nhập CSV'**
+  String get settingsCsvImportTitle;
 
-  /// No description provided for @settingsCsvMergeSubtitle.
+  /// No description provided for @settingsCsvImportSubtitle.
   ///
   /// In vi, this message translates to:
-  /// **'Gộp theo id. Giao dịch nhập chỉ để xem lịch sử — không tính vào số dư hay thống kê.'**
-  String get settingsCsvMergeSubtitle;
-
-  /// No description provided for @settingsCsvReplaceTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Nhập CSV (thay thế toàn bộ)'**
-  String get settingsCsvReplaceTitle;
-
-  /// No description provided for @settingsCsvReplaceSubtitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Xoá toàn bộ dữ liệu hiện tại và khôi phục từ CSV. Cần chọn hai file: ví rồi giao dịch.'**
-  String get settingsCsvReplaceSubtitle;
+  /// **'Nhập ví và giao dịch từ file CSV. Ví trùng id được giữ nguyên; giao dịch trùng id được cập nhật.'**
+  String get settingsCsvImportSubtitle;
 
   /// No description provided for @settingsKeywordLibraryTitle.
   ///
@@ -896,95 +884,42 @@ abstract class AppLocalizations {
   /// **'Xuất CSV thất bại: {error}'**
   String settingsExportFailed(String error);
 
-  /// No description provided for @settingsImportModeTitle.
+  /// No description provided for @settingsCsvImportConfirmTitle.
   ///
   /// In vi, this message translates to:
-  /// **'Chọn chế độ nhập'**
-  String get settingsImportModeTitle;
+  /// **'Nhập dữ liệu từ CSV?'**
+  String get settingsCsvImportConfirmTitle;
 
-  /// No description provided for @settingsImportContextOnlyTitle.
+  /// No description provided for @settingsCsvImportConfirmBody.
   ///
   /// In vi, this message translates to:
-  /// **'Chỉ lưu trữ'**
-  String get settingsImportContextOnlyTitle;
+  /// **'Ví có id đã tồn tại sẽ được giữ nguyên. Giao dịch có id đã tồn tại sẽ được cập nhật theo file CSV; giao dịch mới sẽ được thêm vào.'**
+  String get settingsCsvImportConfirmBody;
 
-  /// No description provided for @settingsImportContextOnlySubtitle.
+  /// No description provided for @settingsCsvImportConfirmAction.
   ///
   /// In vi, this message translates to:
-  /// **'Không ảnh hưởng đến số dư ví.'**
-  String get settingsImportContextOnlySubtitle;
+  /// **'Nhập'**
+  String get settingsCsvImportConfirmAction;
 
-  /// No description provided for @settingsImportReconstructTitle.
+  /// No description provided for @settingsCsvWrongFileType.
   ///
   /// In vi, this message translates to:
-  /// **'Khôi phục số dư'**
-  String get settingsImportReconstructTitle;
+  /// **'Vui lòng chọn một file .csv.'**
+  String get settingsCsvWrongFileType;
 
-  /// No description provided for @settingsImportReconstructSubtitle.
+  /// No description provided for @csvImportResult.
   ///
   /// In vi, this message translates to:
-  /// **'Tính vào số dư — chỉ dùng cho ví trống.'**
-  String get settingsImportReconstructSubtitle;
-
-  /// No description provided for @csvMergeResult.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã gộp {added} giao dịch mới (bỏ qua {skipped}).'**
-  String csvMergeResult(int added, int skipped);
-
-  /// No description provided for @settingsNonEmptyWalletError.
-  ///
-  /// In vi, this message translates to:
-  /// **'Ví đã có giao dịch ảnh hưởng số dư. Chọn \"Chỉ lưu trữ\" hoặc dùng ví trống.'**
-  String get settingsNonEmptyWalletError;
+  /// **'{walletsAdded} ví mới ({walletsSkipped} bỏ qua), {txnsAdded} giao dịch mới, {txnsUpdated} giao dịch đã cập nhật.'**
+  String csvImportResult(
+      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated);
 
   /// No description provided for @settingsImportFailed.
   ///
   /// In vi, this message translates to:
   /// **'Nhập CSV thất bại: {error}'**
   String settingsImportFailed(String error);
-
-  /// No description provided for @settingsReplaceConfirmTitle.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thay thế toàn bộ dữ liệu?'**
-  String get settingsReplaceConfirmTitle;
-
-  /// No description provided for @settingsReplaceConfirmBody.
-  ///
-  /// In vi, this message translates to:
-  /// **'Thao tác này sẽ XOÁ toàn bộ ví và giao dịch hiện tại, sau đó khôi phục từ hai file CSV (ví + giao dịch).\n\nKhông thể hoàn tác. Hãy chắc chắn bạn có bản sao lưu.'**
-  String get settingsReplaceConfirmBody;
-
-  /// No description provided for @settingsReplaceConfirmAction.
-  ///
-  /// In vi, this message translates to:
-  /// **'Tiếp tục'**
-  String get settingsReplaceConfirmAction;
-
-  /// No description provided for @settingsPickWalletFile.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chọn file ví (myfinance_wallets_...)'**
-  String get settingsPickWalletFile;
-
-  /// No description provided for @settingsPickTxnFile.
-  ///
-  /// In vi, this message translates to:
-  /// **'Chọn file giao dịch (myfinance_txns_...)'**
-  String get settingsPickTxnFile;
-
-  /// No description provided for @csvReplaceResult.
-  ///
-  /// In vi, this message translates to:
-  /// **'Đã khôi phục {added} giao dịch.'**
-  String csvReplaceResult(int added);
-
-  /// No description provided for @settingsRestoreFailed.
-  ///
-  /// In vi, this message translates to:
-  /// **'Khôi phục thất bại: {error}'**
-  String settingsRestoreFailed(String error);
 
   /// No description provided for @settingsNotifPermTitle.
   ///
@@ -1489,6 +1424,42 @@ abstract class AppLocalizations {
   /// In vi, this message translates to:
   /// **'Thông báo sẽ không tạo giao dịch nào.'**
   String get captureConfirmDismissConfirmBody;
+
+  /// No description provided for @notifCaptureChannelName.
+  ///
+  /// In vi, this message translates to:
+  /// **'Thông báo giao dịch ngân hàng'**
+  String get notifCaptureChannelName;
+
+  /// No description provided for @notifCaptureChannelDescription.
+  ///
+  /// In vi, this message translates to:
+  /// **'Báo khi có giao dịch ngân hàng mới được ghi nhận'**
+  String get notifCaptureChannelDescription;
+
+  /// No description provided for @notifCaptureTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Giao dịch ngân hàng mới'**
+  String get notifCaptureTitle;
+
+  /// No description provided for @notifCaptureBody.
+  ///
+  /// In vi, this message translates to:
+  /// **'Có giao dịch {amount} vào {wallet}'**
+  String notifCaptureBody(String amount, String wallet);
+
+  /// No description provided for @notifCaptureBodyNoWallet.
+  ///
+  /// In vi, this message translates to:
+  /// **'Có giao dịch {amount}, chưa xác định ví'**
+  String notifCaptureBodyNoWallet(String amount);
+
+  /// No description provided for @notifCaptureBodyUnparsed.
+  ///
+  /// In vi, this message translates to:
+  /// **'Có một thông báo ngân hàng cần bạn xác nhận thủ công'**
+  String get notifCaptureBodyUnparsed;
 }
 
 class _AppLocalizationsDelegate

@@ -9,10 +9,10 @@ import '../data/database.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
-import '../services/csv_service.dart';
 import '../services/notification_service.dart';
 import 'categories_page.dart';
 import 'theme_customization_page.dart';
+import 'widgets/icon_slots.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -35,9 +35,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final l10n = AppLocalizations.of(context)!;
     setState(() => _busy = true);
     try {
-      final files = await ref.read(repositoryProvider).csv.export();
+      final settings = ref.read(settingsProvider);
+      final suggester = ref.read(suggesterProvider);
+      final file = await ref.read(repositoryProvider).csv.exportAll(
+            settingsEntries: settings.exportEntries(kIconSlots),
+            keywordRules: await suggester.loadRaw(),
+          );
       await SharePlus.instance
-          .share(ShareParams(files: files, subject: l10n.settingsCsvShareSubject));
+          .share(ShareParams(files: [file], subject: l10n.settingsCsvShareSubject));
     } catch (e) {
       _snack(l10n.settingsExportFailed(e.toString()));
     } finally {
@@ -45,101 +50,46 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
-  Future<void> _importMerge() async {
-    final l10n = AppLocalizations.of(context)!;
-    final mode = await showDialog<CsvImportMode>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l10n.settingsImportModeTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(l10n.settingsImportContextOnlyTitle),
-              subtitle: Text(l10n.settingsImportContextOnlySubtitle),
-              onTap: () => Navigator.pop(ctx, CsvImportMode.contextOnly),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(l10n.settingsImportReconstructTitle),
-              subtitle: Text(l10n.settingsImportReconstructSubtitle),
-              onTap: () => Navigator.pop(ctx, CsvImportMode.reconstructBalance),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(l10n.commonCancel),
-          ),
-        ],
-      ),
-    );
-    if (mode == null || !mounted) return;
-
-    final picked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final path = picked?.files.single.path;
-    if (path == null) return;
-
-    setState(() => _busy = true);
-    try {
-      final r = await ref
-          .read(repositoryProvider)
-          .csv
-          .importMerge(path, mode: mode);
-      _snack(l10n.csvMergeResult(r.added, r.skipped));
-    } on NonEmptyWalletReconstructError {
-      _snack(l10n.settingsNonEmptyWalletError);
-    } catch (e) {
-      _snack(l10n.settingsImportFailed(e.toString()));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _importReplace() async {
+  Future<void> _import() async {
     final l10n = AppLocalizations.of(context)!;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(l10n.settingsReplaceConfirmTitle),
-        content: Text(l10n.settingsReplaceConfirmBody),
+        title: Text(l10n.settingsCsvImportConfirmTitle),
+        content: Text(l10n.settingsCsvImportConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: Text(l10n.commonCancel)),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(context, true),
-            child: Text(l10n.settingsReplaceConfirmAction),
+            child: Text(l10n.settingsCsvImportConfirmAction),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
 
-    _snack(l10n.settingsPickWalletFile);
-    final wPicked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final wPath = wPicked?.files.single.path;
-    if (wPath == null || !mounted) return;
-
-    _snack(l10n.settingsPickTxnFile);
-    final tPicked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final tPath = tPicked?.files.single.path;
-    if (tPath == null || !mounted) return;
+    // FileType.custom + allowedExtensions asks Android's document picker to
+    // filter by MIME type. Cloud-provider-listed files (e.g. Google Drive)
+    // often don't report the exact MIME type expected, so they show up
+    // greyed out and unselectable even with the right extension. FileType.any
+    // skips that filter; the extension is checked here instead.
+    final picked = await FilePicker.platform.pickFiles(type: FileType.any);
+    final path = picked?.files.single.path;
+    if (path == null) return;
+    if (!path.toLowerCase().endsWith('.csv')) {
+      _snack(l10n.settingsCsvWrongFileType);
+      return;
+    }
 
     setState(() => _busy = true);
     try {
-      final r = await ref.read(repositoryProvider).csv.importReplace(wPath, tPath);
-      _snack(l10n.csvReplaceResult(r.added));
+      final r = await ref.read(repositoryProvider).csv.importAll(path);
+      _snack(l10n.csvImportResult(
+          r.walletsAdded, r.walletsSkipped, r.txnsAdded, r.txnsUpdated));
     } catch (e) {
-      _snack(l10n.settingsRestoreFailed(e.toString()));
+      _snack(l10n.settingsImportFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -419,19 +369,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.download),
-                title: Text(l10n.settingsCsvMergeTitle),
-                subtitle: Text(l10n.settingsCsvMergeSubtitle),
-                onTap: _busy ? null : _importMerge,
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.restore,
-                    color: Theme.of(context).colorScheme.error),
-                title: Text(l10n.settingsCsvReplaceTitle,
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.error)),
-                subtitle: Text(l10n.settingsCsvReplaceSubtitle),
-                onTap: _busy ? null : _importReplace,
+                title: Text(l10n.settingsCsvImportTitle),
+                subtitle: Text(l10n.settingsCsvImportSubtitle),
+                onTap: _busy ? null : _import,
               ),
             ],
           ),
