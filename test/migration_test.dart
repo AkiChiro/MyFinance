@@ -165,6 +165,30 @@ void main() {
       );
     }
 
+    // ── Phase 5: v8 envelope-budgeting migration ──────────────────────────────
+    // onUpgrade cascades every `if (from < N)` block in sequence (not
+    // else-if), so reopening this v2 seed with the current AppDatabase
+    // already ran the v8 migration too, alongside v3-v7. Percentage changes
+    // are never retroactive (see CategoryBudgetHistory's doc-comment), so an
+    // upgrading install must NOT gain the fresh-install defaults — there is
+    // no percentage that was ever "in effect" for pre-existing data.
+    expect(await db.categoryBudgetPercents(), isEmpty,
+        reason: 'upgrading installs must not be retroactively seeded with '
+            'budget percents they never configured');
+
+    await db.close();
+  });
+
+  test('fresh install (onCreate) seeds the default 50/15/20/15 budget split',
+      () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    final percents = await db.categoryBudgetPercents();
+    expect(percents, {
+      'necessities': 50,
+      'food': 15,
+      'hobbies': 20,
+      'others': 15,
+    });
     await db.close();
   });
 }

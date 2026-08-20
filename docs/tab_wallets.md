@@ -17,7 +17,7 @@ WalletsPage (ConsumerWidget)
            └─ _WalletsList
               └─ ListView
                  ├─ HeroBalanceCard        (gradient + count-up total — see architecture.md "Ví tab dashboard")
-                 ├─ RecentActivityPreview  (sparkline + last 5 txns, hides if none — see architecture.md)
+                 ├─ RecentActivityPreview  (net-change caption + last 5 txns, hides if none — see architecture.md)
                  ├─ ReorderableListView.builder (wallet cards × N)
                  │   └─ Card > ListTile
                  │       ├─ leading: Row [ReorderableDragStartListener (drag handle) + CircleAvatar(AppIcon('wallet_cash'|'wallet_bank'))]
@@ -28,7 +28,7 @@ WalletsPage (ConsumerWidget)
                  └─ OutlinedButton "Thêm ví"
 ```
 
-`_WalletsList` and `_Empty` are both given distinct `ValueKey`s so `AnimatedSwitcher` detects the swap and cross-fades instead of a hard cut. See `docs/architecture.md`'s "Ví tab dashboard" section for the hero card / recent-activity preview / sparkline design.
+`_WalletsList` and `_Empty` are both given distinct `ValueKey`s so `AnimatedSwitcher` detects the swap and cross-fades instead of a hard cut. See `docs/architecture.md`'s "Ví tab dashboard" section for the hero card / recent-activity preview design (a sparkline chart was tried in the preview card and removed after on-device feedback that it wasn't informative enough to earn its space — the net-change caption next to it stayed).
 
 ## Data sources
 

@@ -19,7 +19,8 @@ AnalyticsPage (ConsumerStatefulWidget)
            ├─ Comparison row (vs. last month)
            ├─ Year-to-date row
            ├─ Spending pie chart + legend
-           └─ Earning pie chart + legend
+           ├─ Earning pie chart + legend
+           └─ Envelope budgeting section (_EnvelopeSection)
 ```
 
 ## State
@@ -97,8 +98,21 @@ Stream<AnalyticsBundle> watchAnalyticsBundle(DateTime month) async* {
 1. **Totals**: one row with 6 conditional `SUM`s using Unix-second boundaries
 2. **Category breakdowns**: two `GROUP BY category` queries
 
-All SQL filters: `WHERE affects_balance=1 AND type != 'transfer'`. Transfers are deliberately excluded from the spending/earning totals because they don't represent new income or expense — they move money between wallets.
+All SQL filters: `WHERE type != 'transfer'` (no `affects_balance` gate — see `docs/architecture.md`'s "Analytics computation" section; a balance reset must not remove old spending/earning from these totals). Transfers are deliberately excluded from the spending/earning totals because they don't represent new income or expense — they move money between wallets.
 
-## Key repository call
+## Drill-down navigation
 
-`repo.watchAnalyticsBundle(month)` — the single data dependency. Everything in the page derives from the emitted `AnalyticsBundle`.
+Tapping the Tổng chi/Tổng thu stat cards, a pie slice, or a legend row switches to Giao dịch pre-filtered to match — see `docs/architecture.md`'s "Analytics drill-down" section for the full design (`_drillDown()`, the providers it writes, the `FlTapUpEvent` pie-touch handling, and the "Khác" category-coalescing fix this relies on). Only the two stat cards and the two pie sections are interactive this way — `_YearCard` and the "Chênh lệch tháng này" comparison row stay non-interactive, intentionally. `_EnvelopeSection` rows are also interactive, reusing the same `_drillDown` callback (see below).
+
+## Envelope budgeting section (`_EnvelopeSection`)
+
+A plain `Card`/`ListTile`-style list — one row per active spending category, `spendColor` dot + label + `formatVnd(balance)` (red when negative) — subscribed to `repo.watchEnvelopeBalances()`. Deliberately minimal (no progress bars): this session builds the data layer + a functional display; visual treatment is expected to be refined separately (this project splits core/business-logic work from UI/UX polish across two chats).
+
+Unlike every other section on this page, envelope balances are **cumulative since forever**, not scoped to `_month` — so `_EnvelopeSection` keeps its own `StreamBuilder` rather than being folded into `_Stats`/`AnalyticsBundle`. It reuses the `catLabels` map `_AnalyticsPageState.build()` already computes once (a third consumer, alongside the two `_PieSection`s). Tapping a row calls the page's existing `_drillDown(type: TxTypes.spending, category: categoryId)` — same navigation the stat cards/pie already use, not a second mechanism.
+
+Budget percents themselves are configured in `CategoriesPage` (Cài đặt → Quản lý danh mục), not here — see `docs/tab_settings.md`. Full computation details (the as-of join against `category_budget_history`, the non-retroactive-percentage design, why it filters `affects_balance` unlike the rest of this page) are in `docs/architecture.md`'s "Envelope budgeting" section.
+
+## Key repository calls
+
+- `repo.watchAnalyticsBundle(month)` — the month-scoped data dependency for everything except the envelope section.
+- `repo.watchEnvelopeBalances()` — cumulative-since-forever `{categoryId → balance}` for `_EnvelopeSection`.

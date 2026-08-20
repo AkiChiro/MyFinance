@@ -40,10 +40,16 @@ All providers are declared in `lib/providers.dart` and overridden in `main()` wi
 | `settingsProvider` | `ChangeNotifierProvider<AppSettings>` | SharedPreferences wrapper (rebuilds UI on change) |
 | `monthModeProvider` | `StateProvider<bool>` | whether the Giao dịch tab is in month-filter mode |
 | `selectedMonthProvider` | `StateProvider<DateTime>` | the month currently shown in month-filter mode |
+| `homeTabIndexProvider` | `StateProvider<int>` | bottom-nav tab index — lifted out of `HomePage` local `State` so other screens can switch tabs (e.g. Analytics drill-down) |
+| `txnTypeFilterProvider` | `StateProvider<String?>` | Giao dịch's active type filter (`TxTypes.spending`/`.earning`/`null`) |
+| `txnCategoryFilterProvider` | `StateProvider<String?>` | Giao dịch's active category filter |
+| `txnStarredOnlyProvider` | `StateProvider<bool>` | Giao dịch's "Có sao" filter |
 
 `settingsProvider` uses `ChangeNotifierProvider` from `flutter_riverpod/legacy.dart` (Riverpod 3.x removed the top-level export; must import `legacy.dart` explicitly).
 
-## Database schema (schema version 7)
+`homeTabIndexProvider`/`txnTypeFilterProvider`/`txnCategoryFilterProvider`/`txnStarredOnlyProvider` follow the exact `monthModeProvider`/`selectedMonthProvider` pattern: cross-widget UI state lives in a `StateProvider` rather than a screen's local `State`, whenever more than one screen needs to read or write it. `TransactionsPage` is still each filter's primary owner (`_sortDirection` alone stays local `State` — it reorders, never hides rows, so no other screen needs to touch it); `AnalyticsPage` writes all four as part of drill-down navigation — see "Analytics drill-down" below.
+
+## Database schema (schema version 8)
 
 ### Table: `wallets`
 
@@ -115,6 +121,17 @@ Partial indexes on `wallet_id`, `wallet_to_id`, `timestamp`, `(type, timestamp)`
 | `archived` | BOOL | soft-delete (never physically remove — historical transactions reference category IDs) |
 | `sort_order` | INT | display order |
 
+### Table: `category_budget_history`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | TEXT PK | UUID v4 |
+| `category_id` | TEXT | spending category id (no FK — matches `txns.category`'s plain-string-id convention) |
+| `percent` | INT | 0-100, whole percent of every earning allocated to this category |
+| `effective_from` | INT | Unix seconds |
+
+Append-only (schema v8) — a percent edit always **inserts** a new row, never updates one. Never physically pruned. See "Envelope budgeting" below for how this is read.
+
 ## Append-only enums
 
 These enums are serialized to the DB as their `.name` string. **Never** rename, reorder, or remove values — existing DB rows would become unparseable.
@@ -152,6 +169,31 @@ Only `affects_balance=1` rows are included. This means CSV context-only imports 
 Analytics intentionally counts **all visible transactions** (no `affects_balance` filter), so a balance reset does not remove old spending/earning from analytics totals. Only `type='transfer'` rows are excluded since transfers are zero-sum across wallets.
 
 Timestamps are compared as Unix seconds in SQL to match Drift 2.x's storage format.
+
+## Envelope budgeting
+
+The user assigns each active spending category a % of every earning (e.g. Thiết yếu 50%, Ăn uống 15%, Sở thích 20%, Khác 15%); the category's envelope balance is that accumulated share minus whatever's been spent in that category. Like balance (ADR-0004) and analytics, this is **computed entirely on read** — nothing is written to `txns`/`wallets`/`app_categories`, and `addSpending`/`addEarning`/`updateTxn`/`deleteTxn`/`confirmCapture` have zero envelope-specific code.
+
+**Non-retroactive percentages**: `category_budget_history` is append-only — editing a category's % inserts a new row (`effective_from = now`) rather than mutating one. `AppDatabase._buildEnvelopeBalances()` reads it via an "as-of" join: for each earning, the applicable percent is the history row with the largest `effective_from <= ` that earning's own `timestamp`. This makes a percent change apply only to income recorded after the change — mirrors `wallets.balance_cutoff_at`'s point-in-time cutover, just as a full history instead of one mutable column. An earning older than any configured percent for a category contributes exactly $0 (no applicable row) — no backfill migration needed when a percent is first set.
+
+```sql
+-- earned share per active spending category (as-of join against history)
+SELECT c.id, SUM(e.amount * <percent in effect at e.timestamp> / 100)
+FROM app_categories c ... JOIN txns e ON e.type='earning' AND e.affects_balance=1
+WHERE c.kind='spending' AND c.archived=0
+
+-- spent per category, all-time (not month-scoped)
+SELECT COALESCE(category,'others'), SUM(amount)
+FROM txns WHERE type='spending' AND affects_balance=1 GROUP BY 1
+```
+
+`envelope = earned − spent`, glued in Dart per category (`AppDatabase.watchEnvelopeBalances()`, exposed via `FinanceRepository`). Unlike analytics, envelopes **filter on `affects_balance`** — they track real money only, not CSV context-only rows. Transfers never participate (never `type='spending'`/`'earning'`). Archived categories are excluded from the read (`archived=0`) — no special-casing needed in the write paths; if later unarchived, its envelope recomputes across its whole history as if always active, consistent with how `archived` behaves everywhere else in this codebase (a hide flag, not a timeline toggle). `watchEnvelopeBalances()` listens for changes on `txns`, `category_budget_history`, **and** `app_categories` (editing a % or archiving a category must both trigger a re-emit — `watchAnalyticsBundle` only listens to `txns`, which would silently miss those two).
+
+**Overspending an envelope is informational only** — a spending transaction that pushes a category negative still saves normally; this is independent of the hard wallet-balance guard (`OverspendException`/`_assertSufficient`).
+
+**Setting a percent** (`FinanceRepository.setCategoryBudgetPercent`): mirrors `OverspendException`'s zero-payload-exception shape. Throws `BudgetPercentExceededException` if the new percent, summed with every other *active* spending category's current percent (the target category's own prior value is excluded from the sum, not double-counted), would exceed 100%. Summing to less than 100% is allowed — the shortfall is just untracked in any envelope.
+
+Fresh installs (`onCreate` only, never the upgrade path) seed necessities/food/hobbies/others at 50/15/20/15 (`effective_from: 0`) — the feature's own worked example. An install upgrading from an earlier schema version gains **no** seeded percentages: there is no percent that was ever "in effect" for pre-existing data, so every category reads as unbudgeted until the user explicitly configures one.
 
 ## Bank capture pipeline
 
@@ -260,7 +302,7 @@ Flutter-side wrapper for `flutter_local_notifications`. Creates and manages a pe
 
 ### `CsvService`
 
-Single-file CSV export/import (`lib/services/csv_service.dart`). There is no per-section header row — every row's **first cell is a record-type discriminator** (`META`/`WALLET`/`TXN`/`CATEGORY`/`SETTING`/`KEYWORD`), so heterogeneous "tables" round-trip through one `CsvToListConverter`/`ListToCsvConverter` pass:
+Single-file CSV export/import (`lib/services/csv_service.dart`). There is no per-section header row — every row's **first cell is a record-type discriminator** (`META`/`WALLET`/`TXN`/`CATEGORY`/`SETTING`/`KEYWORD`/`BUDGET`), so heterogeneous "tables" round-trip through one `CsvToListConverter`/`ListToCsvConverter` pass:
 
 ```
 META,schema_version,exported_at
@@ -269,11 +311,12 @@ TXN,id,type,amount,description,wallet_id,wallet_to_id,wallet_from_name,wallet_to
 CATEGORY,id,label,kind,threshold,is_default,archived,sort_order
 SETTING,key,value
 KEYWORD,keyword,category,weight
+BUDGET,id,category_id,percent,effective_from
 ```
 
-**`exportAll({settingsEntries, keywordRules})`** — one `XFile`. Wallets/transactions/categories come from `AppDatabase`; `settingsEntries` (`AppSettings.exportEntries(kIconSlots)`) and `keywordRules` (`CategorySuggester.loadRaw()`) are passed in by the caller (`SettingsPage`) so `CsvService` itself only depends on `AppDatabase`. CATEGORY/SETTING/KEYWORD rows exist for backup/documentation only — they are not re-imported (see below).
+**`exportAll({settingsEntries, keywordRules})`** — one `XFile`. Wallets/transactions/categories/the full `category_budget_history` timeline (`AppDatabase.allCategoryBudgetHistory()`) come from `AppDatabase`; `settingsEntries` (`AppSettings.exportEntries(kIconSlots)`) and `keywordRules` (`CategorySuggester.loadRaw()`) are passed in by the caller (`SettingsPage`) so `CsvService` itself only depends on `AppDatabase`. CATEGORY/SETTING/KEYWORD/BUDGET rows exist for backup/documentation only — they are not re-imported (see below).
 
-**`importAll(path)`** — reads **wallets + transactions only**; META/CATEGORY/SETTING/KEYWORD rows are parsed and ignored. Merge semantics (chosen because balance no longer depends on wallet emptiness — see `balance_cutoff_at` below):
+**`importAll(path)`** — reads **wallets + transactions only**; META/CATEGORY/SETTING/KEYWORD/BUDGET rows are parsed and ignored. Merge semantics (chosen because balance no longer depends on wallet emptiness — see `balance_cutoff_at` below):
 - **Wallets**: insert-if-absent. A row whose `id` already exists in the database is skipped entirely — the existing wallet (and its live `balance_cutoff_at`/`sort_order`/`package_name`) always wins over an older export.
 - **Transactions**: upsert by `id` (`insertOnConflictUpdate`), applying every column exactly as stored in the file — `source`/`affects_balance`/`starred`/`imported` all round-trip faithfully. Re-importing the same file (or an overlapping backup) is idempotent.
 - Returns an `ImportSummary` (`walletsAdded`, `walletsSkipped`, `txnsAdded`, `txnsUpdated`) for the settings-page result snackbar.
@@ -310,16 +353,24 @@ Flutter's `gen-l10n` toolchain generates `AppLocalizations` from `lib/l10n/app_v
 
 `WalletsPage` splits into `_WalletsList` (the populated state) and `_Empty` (fade/scale-in via `TweenAnimationBuilder`), swapped with an `AnimatedSwitcher`. `_WalletsList` renders, top to bottom:
 1. `HeroBalanceCard` (`lib/ui/widgets/hero_balance_card.dart`) — replaces the old plain "Tổng số dư" `Card` in place. A primary→tertiary gradient container (both colors derived from the seed, so it always harmonizes) with a `TweenAnimationBuilder<double>` count-up animation on the total.
-2. `RecentActivityPreview` (`lib/ui/widgets/recent_activity_preview.dart`) — a new `ConsumerWidget` that subscribes to `repo.watchTxns()` (the same stream `TransactionsPage` uses) and takes the first 5 client-side rather than adding a dedicated bounded query. `_trendOf(recentTxns)` computes both the cumulative signed-amount running total (oldest→newest — transfers contribute 0 since they net to zero across the user's own wallets) and the final net change in one pass, returned together as a `_Trend` so the sparkline and the caption never disagree. Above the sparkline, a caption reads "Qua N giao dịch gần nhất · ±X ₫" (`walletsRecentActivitySubtitle` + the formatted net change, colored green/red/primary by sign) — added after on-device feedback that a bare line with no axis, value, or scope label was hard to read. The `_TrendSparkline` itself now draws a dashed zero-reference `HorizontalLine` (`extraLinesData`) and colors the line/fill by the same net-change sign as the caption, with `minY`/`maxY` padded symmetrically around zero so the reference line never sits flush on an edge. Below the sparkline: up to 5 compact `_RecentTile` rows (not a reuse of `_TxnTile` — keeps `transactions_page.dart` untouched and avoids dragging its action-sheet/edit-navigation semantics into a preview). The whole card hides (`SizedBox.shrink()`) when there are no transactions yet.
+2. `RecentActivityPreview` (`lib/ui/widgets/recent_activity_preview.dart`) — a new `ConsumerWidget` that subscribes to `repo.watchTxns()` (the same stream `TransactionsPage` uses) and takes the first 5 client-side rather than adding a dedicated bounded query. `_netChangeOf(recentTxns)` sums signed amounts across the slice (transfers contribute 0 since they net to zero across the user's own wallets). A caption reads "Qua N giao dịch gần nhất · ±X ₫" (`walletsRecentActivitySubtitle` + the formatted net change, colored green/red/primary by sign). **A sparkline chart originally sat below this caption** (an `fl_chart` `LineChart` with a dashed zero-reference line, colored by net-change sign) but was removed after on-device feedback that it didn't carry enough information to earn its space — the caption alone (which the chart was originally added to give the chart context for) turned out to be the actually-useful part, so it stayed. Below the caption: up to 5 compact `_RecentTile` rows (not a reuse of `_TxnTile` — keeps `transactions_page.dart` untouched and avoids dragging its action-sheet/edit-navigation semantics into a preview). The whole card hides (`SizedBox.shrink()`) when there are no transactions yet.
 3. The existing `ReorderableListView` of wallet cards — unchanged in position and behavior.
 
-No "see all" navigation from the preview to the Giao dịch tab in this pass (would need a new cross-tab provider since `WalletsPage` has no callback into `HomePage`'s tab index today).
+No "see all" link from the preview to the Giao dịch tab yet — `homeTabIndexProvider` (added for the Analytics drill-down below) makes this straightforward now, but it hasn't been requested.
+
+## Analytics drill-down
+
+`AnalyticsPage`'s `_drillDown({required type, category})` (in `_AnalyticsPageState`) writes `txnTypeFilterProvider`, `txnCategoryFilterProvider`, resets `txnStarredOnlyProvider` to `false`, sets `monthModeProvider = true` and `selectedMonthProvider = _month` (scoping Giao dịch to the *same* month being viewed in Thống kê — required, since `_StatCard`/`_PieSection` figures are month-scoped, not all-time), then sets `homeTabIndexProvider = 1`. Wired from two places:
+- `_StatCard` (Tổng chi/Tổng thu) — a new `onTap: VoidCallback?`, wrapped via `InkWell` inside the existing `Card` (radius matches `main.dart`'s global `CardThemeData`), calling `_drillDown(type: ...)` with no category.
+- `_PieSection` — a new `onSliceTap: void Function(String categoryId)?`, called from both the pie chart's `touchCallback` (a `FlTapUpEvent` branch reading `PieTouchResponse.touchedSection.touchedSectionIndex`, additive to the existing highlight-on-touch logic — `isInterestedForInteractions` is `false` for taps specifically on mobile, so this branch can't reuse that guard) and each legend row (wrapped in `InkWell`). Both index into the same `entries` list that drives the pie sections, so `entries[i].key` is the tapped category id either way.
+
+`transactions_page.dart`'s category filter coalesces a null `category` into its type's synthetic bucket (`t.category ?? (earning ? 'others_earn' : 'others')`) before comparing — mirrors the analytics SQL's own `COALESCE(category, 'others'|'others_earn')` exactly, so a drill-down into (or a manual filter by) "Khác" includes uncategorized transactions the same way the analytics total already did. `'others'`/`'others_earn'` are simultaneously the real seeded ids of the default "Khác" categories and the analytics bucket for `category IS NULL` rows (reachable via `CaptureConfirmPage`'s "— Bỏ qua —" option).
 
 ## Navigation
 
-`HomePage` is the root scaffold. It uses a `NavigationBar` with 4 destinations. The Giao dịch tab icon shows a `Badge` when `pendingCaptureCount > 0`.
+`HomePage` is the root scaffold. It uses a `NavigationBar` with 4 destinations. The Giao dịch tab icon shows a `Badge` when `pendingCaptureCount > 0`. The active tab index lives in `homeTabIndexProvider` (not local `State`), so other screens can switch tabs — see "Analytics drill-down" above.
 
-Tab switching: `GestureDetector` wraps the `IndexedStack` body with `onHorizontalDragEnd`. Swipe left (velocity < −300) advances one tab; swipe right (velocity > 300) goes back one tab. `HitTestBehavior.opaque` ensures the gesture captures swipes over any child widget that doesn't handle them itself.
+Tab switching: `GestureDetector` wraps the `IndexedStack` body with `onHorizontalDragEnd`, writing `homeTabIndexProvider`. Swipe left (velocity < −300) advances one tab; swipe right (velocity > 300) goes back one tab. `HitTestBehavior.opaque` ensures the gesture captures swipes over any child widget that doesn't handle them itself.
 
 Sub-screens are pushed with `Navigator.of(context).push(MaterialPageRoute(...))`. There is no named-route graph beyond `/` and `/quick-add`.
 

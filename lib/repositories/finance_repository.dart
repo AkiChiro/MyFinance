@@ -14,6 +14,13 @@ class OverspendException implements Exception {
   const OverspendException();
 }
 
+/// Thrown when a new budget percent would push the sum across all active
+/// spending categories above 100%. Mirrors OverspendException — a zero-
+/// payload marker; the UI resolves the localized message at the catch site.
+class BudgetPercentExceededException implements Exception {
+  const BudgetPercentExceededException();
+}
+
 class FinanceRepository {
   FinanceRepository(this.db) : csv = CsvService(db);
 
@@ -32,6 +39,11 @@ class FinanceRepository {
   Stream<int> pendingCaptureCount() => db.pendingCaptureCount();
   Future<List<Wallet>> allWallets() => db.allWallets();
 
+  /// Envelope budgeting: {categoryId → current derived balance}. Cumulative
+  /// since forever (not month-scoped) — see docs/architecture.md "Envelope
+  /// budgeting computation".
+  Stream<Map<String, int>> watchEnvelopeBalances() => db.watchEnvelopeBalances();
+
   // ── Categories ────────────────────────────────────────────────────────────────
 
   Stream<List<AppCategory>> watchActiveCategories(String kind) =>
@@ -43,21 +55,30 @@ class FinanceRepository {
   Future<Map<String, int>> categoryThresholds(String kind) =>
       db.categoryThresholds(kind);
 
-  Future<void> addCategory({
+  /// Envelope budgeting: current effective % per category (latest history
+  /// row wins). A category absent from the map has never had one set (0%).
+  Stream<Map<String, int>> watchCategoryBudgetPercents() =>
+      db.watchCategoryBudgetPercents();
+
+  /// Returns the new category's id (mirrors addWallet — callers that need to
+  /// immediately act on the created row, e.g. setting a budget %, need it).
+  Future<String> addCategory({
     required String label,
     required String kind,
     int threshold = 0,
   }) async {
     final existing = await db.activeCategories(kind);
+    final id = _uuid.v4();
     await db.into(db.appCategories).insert(
           AppCategoriesCompanion.insert(
-            id: _uuid.v4(),
+            id: id,
             label: label,
             kind: kind,
             threshold: Value(threshold),
             sortOrder: Value(existing.length),
           ),
         );
+    return id;
   }
 
   Future<void> updateCategory(AppCategory cat) =>
@@ -80,6 +101,32 @@ class FinanceRepository {
   Future<void> setCategoryThreshold(String id, int threshold) =>
       (db.update(db.appCategories)..where((c) => c.id.equals(id)))
           .write(AppCategoriesCompanion(threshold: Value(threshold)));
+
+  /// Envelope budgeting: appends a new effective-now percent for [categoryId]
+  /// (never mutates an existing row — see CategoryBudgetHistory doc-comment).
+  /// Throws [BudgetPercentExceededException] if [percent] plus every other
+  /// active spending category's current percent would exceed 100%; [percent]
+  /// itself replaces (not adds to) categoryId's own prior contribution.
+  Future<void> setCategoryBudgetPercent(String categoryId, int percent) async {
+    await db.transaction(() async {
+      final activeSpending = await db.activeCategories(TxTypes.spending);
+      final current = await db.categoryBudgetPercents();
+      final sum = percent +
+          activeSpending
+              .where((c) => c.id != categoryId)
+              .fold<int>(0, (s, c) => s + (current[c.id] ?? 0));
+      if (sum > 100) throw const BudgetPercentExceededException();
+
+      await db.into(db.categoryBudgetHistory).insert(
+            CategoryBudgetHistoryCompanion.insert(
+              id: _uuid.v4(),
+              categoryId: categoryId,
+              percent: percent,
+              effectiveFrom: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            ),
+          );
+    });
+  }
 
   // ── Balance ─────────────────────────────────────────────────────────────────
 

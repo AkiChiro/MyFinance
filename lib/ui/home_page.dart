@@ -23,8 +23,6 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  int _index = 0;
-
   static const _pages = [
     WalletsPage(),
     TransactionsPage(),
@@ -70,6 +68,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final repo = ref.read(repositoryProvider);
     final monthMode = ref.watch(monthModeProvider);
     final selectedMonth = ref.watch(selectedMonthProvider);
+    final index = ref.watch(homeTabIndexProvider);
     final l10n = AppLocalizations.of(context)!;
     final titles = [
       l10n.navWallets,
@@ -80,8 +79,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(titles[_index]),
-        actions: _index == 1 && monthMode
+        title: Text(titles[index]),
+        actions: index == 1 && monthMode
             ? [
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
@@ -107,14 +106,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: GestureDetector(
         onHorizontalDragEnd: (details) {
           final v = details.primaryVelocity ?? 0;
-          if (v < -300 && _index < _pages.length - 1) {
-            setState(() => _index++);
-          } else if (v > 300 && _index > 0) {
-            setState(() => _index--);
+          if (v < -300 && index < _pages.length - 1) {
+            ref.read(homeTabIndexProvider.notifier).state = index + 1;
+          } else if (v > 300 && index > 0) {
+            ref.read(homeTabIndexProvider.notifier).state = index - 1;
           }
         },
         behavior: HitTestBehavior.opaque,
-        child: IndexedStack(index: _index, children: _pages),
+        child: IndexedStack(index: index, children: _pages),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openQuickAdd(),
@@ -126,8 +125,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         builder: (context, snap) {
           final captureCount = snap.data ?? 0;
           return NavigationBar(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
+            selectedIndex: index,
+            onDestinationSelected: (i) =>
+                ref.read(homeTabIndexProvider.notifier).state = i,
             destinations: [
               NavigationDestination(
                   icon: const AppIcon('nav_wallets',

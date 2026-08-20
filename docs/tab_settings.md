@@ -114,6 +114,8 @@ A single import path, no mode picker. `importAll` reads **wallets + transactions
 
 Navigates to `CategoriesPage` (separate file). Category changes are immediately reflected everywhere via `watchActiveCategories` streams.
 
+`CategoriesPage`'s add/edit dialogs also carry an optional budget-% field (spending categories only, same conditional-field pattern as the auto-star threshold field next to it) — sets that category's envelope-budgeting split via `FinanceRepository.setCategoryBudgetPercent`, which throws `BudgetPercentExceededException` (shown inline in the dialog, dialog stays open) if the new total across active spending categories would exceed 100%. See `docs/architecture.md`'s "Envelope budgeting" section for the computation this feeds (Thống kê tab's `_EnvelopeSection`).
+
 ## Theme customization
 
 Navigates to `ThemeCustomizationPage`. Allows changing seed color, dark/light/system mode, custom scaffold background color, custom font color, and a background image. All changes write to `AppSettings` which triggers a global rebuild.

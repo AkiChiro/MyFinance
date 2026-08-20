@@ -20,18 +20,16 @@ class TransactionsPage extends ConsumerStatefulWidget {
 }
 
 class _TransactionsPageState extends ConsumerState<TransactionsPage> {
-  bool _starredOnly = false;
-  String? _typeFilter; // null = all, TxTypes.spending, TxTypes.earning
-  String? _categoryFilter;
   // null = sort by timestamp, 'asc' = amount lowest first, 'desc' = amount highest first
   String? _sortDirection;
 
   Widget _buildFilterBar(BuildContext context, List<AppCategory> allCats,
       Map<String, String> catLabels) {
     final l10n = AppLocalizations.of(context)!;
-    final typeCats = _typeFilter == null
-        ? const <AppCategory>[]
-        : allCats.where((c) => c.kind == _typeFilter && !c.archived).toList();
+    final typeFilter = ref.watch(txnTypeFilterProvider);
+    final categoryFilter = ref.watch(txnCategoryFilterProvider);
+    final starredOnly = ref.watch(txnStarredOnlyProvider);
+    final monthMode = ref.watch(monthModeProvider);
 
     final sortLabel = switch (_sortDirection) {
       'asc' => l10n.txnsAmountAsc,
@@ -39,7 +37,39 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       _ => l10n.fieldAmount,
     };
 
-    final monthMode = ref.watch(monthModeProvider);
+    // Folds the type ChoiceChip and the category picker into one control:
+    // inactive shows just the type label; tapping activates it (and reveals
+    // the dropdown arrow); tapping again while active opens the category
+    // picker, after which the chip's label switches to the category name.
+    Widget typeCategoryChip({
+      required String type,
+      required String typeLabel,
+      required List<AppCategory> categoriesForType,
+    }) {
+      final isActive = typeFilter == type;
+      final currentLabel = isActive && categoryFilter != null
+          ? (catLabels[categoryFilter] ?? categoryFilter)
+          : typeLabel;
+      return ChoiceChip(
+        showCheckmark: false,
+        label: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(currentLabel),
+            if (isActive) const Icon(Icons.arrow_drop_down, size: 18),
+          ],
+        ),
+        selected: isActive,
+        onSelected: (_) {
+          if (!isActive) {
+            ref.read(txnTypeFilterProvider.notifier).state = type;
+            ref.read(txnCategoryFilterProvider.notifier).state = null;
+          } else {
+            _pickCategory(context, categoriesForType);
+          }
+        },
+      );
+    }
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -48,56 +78,43 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
         children: [
           ChoiceChip(
             label: Text(monthMode ? l10n.txnsChipMonth : l10n.txnsChipAll),
-            selected: _typeFilter == null,
+            selected: typeFilter == null,
             onSelected: (_) {
-              if (_typeFilter != null) {
-                setState(() {
-                  _typeFilter = null;
-                  _categoryFilter = null;
-                });
+              if (typeFilter != null) {
+                ref.read(txnTypeFilterProvider.notifier).state = null;
+                ref.read(txnCategoryFilterProvider.notifier).state = null;
               } else {
                 ref.read(monthModeProvider.notifier).state = !monthMode;
               }
             },
           ),
           const SizedBox(width: 8),
-          ChoiceChip(
-            label: Text(l10n.txTypeSpending),
-            selected: _typeFilter == TxTypes.spending,
-            onSelected: (_) => setState(() {
-              _typeFilter = TxTypes.spending;
-              _categoryFilter = null;
-            }),
+          typeCategoryChip(
+            type: TxTypes.spending,
+            typeLabel: l10n.txTypeSpending,
+            categoriesForType: allCats
+                .where((c) => c.kind == TxTypes.spending && !c.archived)
+                .toList(),
           ),
           const SizedBox(width: 8),
-          ChoiceChip(
-            label: Text(l10n.txTypeEarning),
-            selected: _typeFilter == TxTypes.earning,
-            onSelected: (_) => setState(() {
-              _typeFilter = TxTypes.earning;
-              _categoryFilter = null;
-            }),
+          typeCategoryChip(
+            type: TxTypes.earning,
+            typeLabel: l10n.txTypeEarning,
+            categoriesForType: allCats
+                .where((c) => c.kind == TxTypes.earning && !c.archived)
+                .toList(),
           ),
           const SizedBox(width: 8),
           FilterChip(
             avatar: AppIcon('star',
                 fallback: Icons.star,
                 size: 14,
-                color: _starredOnly ? Colors.amber.shade700 : null),
+                color: starredOnly ? Colors.amber.shade700 : null),
             label: Text(l10n.txnsChipStarred),
-            selected: _starredOnly,
-            onSelected: (v) => setState(() => _starredOnly = v),
+            selected: starredOnly,
+            onSelected: (v) =>
+                ref.read(txnStarredOnlyProvider.notifier).state = v,
           ),
-          if (_typeFilter != null) ...[
-            const SizedBox(width: 8),
-            FilterChip(
-              label: Text(_categoryFilter == null
-                  ? l10n.fieldCategory
-                  : (catLabels[_categoryFilter] ?? _categoryFilter!)),
-              selected: _categoryFilter != null,
-              onSelected: (_) => _pickCategory(context, typeCats),
-            ),
-          ],
           const SizedBox(width: 8),
           FilterChip(
             avatar: const Icon(Icons.sort, size: 14),
@@ -139,7 +156,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       ),
     );
     if (picked != null && mounted) {
-      setState(() => _categoryFilter = picked[0]);
+      ref.read(txnCategoryFilterProvider.notifier).state = picked[0];
     }
   }
 
@@ -202,6 +219,9 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                       // Apply filters.
                       final monthMode = ref.watch(monthModeProvider);
                       final selectedMonth = ref.watch(selectedMonthProvider);
+                      final starredOnly = ref.watch(txnStarredOnlyProvider);
+                      final typeFilter = ref.watch(txnTypeFilterProvider);
+                      final categoryFilter = ref.watch(txnCategoryFilterProvider);
                       if (monthMode) {
                         txns = txns
                             .where((t) =>
@@ -209,18 +229,27 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                                 t.timestamp.month == selectedMonth.month)
                             .toList();
                       }
-                      if (_starredOnly) {
+                      if (starredOnly) {
                         txns = txns.where((t) => t.starred).toList();
                       }
-                      if (_typeFilter != null) {
+                      if (typeFilter != null) {
                         txns = txns
-                            .where((t) => t.type == _typeFilter)
+                            .where((t) => t.type == typeFilter)
                             .toList();
                       }
-                      if (_categoryFilter != null) {
-                        txns = txns
-                            .where((t) => t.category == _categoryFilter)
-                            .toList();
+                      if (categoryFilter != null) {
+                        // Coalesce a null category into its type's synthetic
+                        // bucket, mirroring the analytics SQL's own
+                        // COALESCE(category, 'others'|'others_earn') — so a
+                        // "Khác" drill-down/filter includes uncategorized
+                        // transactions too, the same way the tapped total did.
+                        txns = txns.where((t) {
+                          final effectiveCat = t.category ??
+                              (t.type == TxTypes.earning
+                                  ? 'others_earn'
+                                  : 'others');
+                          return effectiveCat == categoryFilter;
+                        }).toList();
                       }
                       if (_sortDirection == 'asc') {
                         txns = [...txns]
@@ -230,7 +259,7 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
                           ..sort((a, b) => b.amount.compareTo(a.amount));
                       }
 
-                      final emptyMessage = _starredOnly
+                      final emptyMessage = starredOnly
                           ? l10n.txnsEmptyStarred
                           : monthMode
                               ? l10n.txnsEmptyMonth

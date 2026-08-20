@@ -2200,6 +2200,285 @@ class NotificationCapturesCompanion
   }
 }
 
+class $CategoryBudgetHistoryTable extends CategoryBudgetHistory
+    with TableInfo<$CategoryBudgetHistoryTable, CategoryBudgetEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CategoryBudgetHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _categoryIdMeta =
+      const VerificationMeta('categoryId');
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+      'category_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _percentMeta =
+      const VerificationMeta('percent');
+  @override
+  late final GeneratedColumn<int> percent = GeneratedColumn<int>(
+      'percent', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _effectiveFromMeta =
+      const VerificationMeta('effectiveFrom');
+  @override
+  late final GeneratedColumn<int> effectiveFrom = GeneratedColumn<int>(
+      'effective_from', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, categoryId, percent, effectiveFrom];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'category_budget_history';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<CategoryBudgetEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+          _categoryIdMeta,
+          categoryId.isAcceptableOrUnknown(
+              data['category_id']!, _categoryIdMeta));
+    } else if (isInserting) {
+      context.missing(_categoryIdMeta);
+    }
+    if (data.containsKey('percent')) {
+      context.handle(_percentMeta,
+          percent.isAcceptableOrUnknown(data['percent']!, _percentMeta));
+    } else if (isInserting) {
+      context.missing(_percentMeta);
+    }
+    if (data.containsKey('effective_from')) {
+      context.handle(
+          _effectiveFromMeta,
+          effectiveFrom.isAcceptableOrUnknown(
+              data['effective_from']!, _effectiveFromMeta));
+    } else if (isInserting) {
+      context.missing(_effectiveFromMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CategoryBudgetEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CategoryBudgetEntry(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      categoryId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category_id'])!,
+      percent: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}percent'])!,
+      effectiveFrom: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}effective_from'])!,
+    );
+  }
+
+  @override
+  $CategoryBudgetHistoryTable createAlias(String alias) {
+    return $CategoryBudgetHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class CategoryBudgetEntry extends DataClass
+    implements Insertable<CategoryBudgetEntry> {
+  final String id;
+  final String categoryId;
+  final int percent;
+  final int effectiveFrom;
+  const CategoryBudgetEntry(
+      {required this.id,
+      required this.categoryId,
+      required this.percent,
+      required this.effectiveFrom});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['category_id'] = Variable<String>(categoryId);
+    map['percent'] = Variable<int>(percent);
+    map['effective_from'] = Variable<int>(effectiveFrom);
+    return map;
+  }
+
+  CategoryBudgetHistoryCompanion toCompanion(bool nullToAbsent) {
+    return CategoryBudgetHistoryCompanion(
+      id: Value(id),
+      categoryId: Value(categoryId),
+      percent: Value(percent),
+      effectiveFrom: Value(effectiveFrom),
+    );
+  }
+
+  factory CategoryBudgetEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CategoryBudgetEntry(
+      id: serializer.fromJson<String>(json['id']),
+      categoryId: serializer.fromJson<String>(json['categoryId']),
+      percent: serializer.fromJson<int>(json['percent']),
+      effectiveFrom: serializer.fromJson<int>(json['effectiveFrom']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'categoryId': serializer.toJson<String>(categoryId),
+      'percent': serializer.toJson<int>(percent),
+      'effectiveFrom': serializer.toJson<int>(effectiveFrom),
+    };
+  }
+
+  CategoryBudgetEntry copyWith(
+          {String? id, String? categoryId, int? percent, int? effectiveFrom}) =>
+      CategoryBudgetEntry(
+        id: id ?? this.id,
+        categoryId: categoryId ?? this.categoryId,
+        percent: percent ?? this.percent,
+        effectiveFrom: effectiveFrom ?? this.effectiveFrom,
+      );
+  CategoryBudgetEntry copyWithCompanion(CategoryBudgetHistoryCompanion data) {
+    return CategoryBudgetEntry(
+      id: data.id.present ? data.id.value : this.id,
+      categoryId:
+          data.categoryId.present ? data.categoryId.value : this.categoryId,
+      percent: data.percent.present ? data.percent.value : this.percent,
+      effectiveFrom: data.effectiveFrom.present
+          ? data.effectiveFrom.value
+          : this.effectiveFrom,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoryBudgetEntry(')
+          ..write('id: $id, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('percent: $percent, ')
+          ..write('effectiveFrom: $effectiveFrom')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, categoryId, percent, effectiveFrom);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CategoryBudgetEntry &&
+          other.id == this.id &&
+          other.categoryId == this.categoryId &&
+          other.percent == this.percent &&
+          other.effectiveFrom == this.effectiveFrom);
+}
+
+class CategoryBudgetHistoryCompanion
+    extends UpdateCompanion<CategoryBudgetEntry> {
+  final Value<String> id;
+  final Value<String> categoryId;
+  final Value<int> percent;
+  final Value<int> effectiveFrom;
+  final Value<int> rowid;
+  const CategoryBudgetHistoryCompanion({
+    this.id = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.percent = const Value.absent(),
+    this.effectiveFrom = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CategoryBudgetHistoryCompanion.insert({
+    required String id,
+    required String categoryId,
+    required int percent,
+    required int effectiveFrom,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        categoryId = Value(categoryId),
+        percent = Value(percent),
+        effectiveFrom = Value(effectiveFrom);
+  static Insertable<CategoryBudgetEntry> custom({
+    Expression<String>? id,
+    Expression<String>? categoryId,
+    Expression<int>? percent,
+    Expression<int>? effectiveFrom,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (categoryId != null) 'category_id': categoryId,
+      if (percent != null) 'percent': percent,
+      if (effectiveFrom != null) 'effective_from': effectiveFrom,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CategoryBudgetHistoryCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? categoryId,
+      Value<int>? percent,
+      Value<int>? effectiveFrom,
+      Value<int>? rowid}) {
+    return CategoryBudgetHistoryCompanion(
+      id: id ?? this.id,
+      categoryId: categoryId ?? this.categoryId,
+      percent: percent ?? this.percent,
+      effectiveFrom: effectiveFrom ?? this.effectiveFrom,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (percent.present) {
+      map['percent'] = Variable<int>(percent.value);
+    }
+    if (effectiveFrom.present) {
+      map['effective_from'] = Variable<int>(effectiveFrom.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoryBudgetHistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('percent: $percent, ')
+          ..write('effectiveFrom: $effectiveFrom, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2208,12 +2487,19 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AppCategoriesTable appCategories = $AppCategoriesTable(this);
   late final $NotificationCapturesTable notificationCaptures =
       $NotificationCapturesTable(this);
+  late final $CategoryBudgetHistoryTable categoryBudgetHistory =
+      $CategoryBudgetHistoryTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [wallets, txns, appCategories, notificationCaptures];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        wallets,
+        txns,
+        appCategories,
+        notificationCaptures,
+        categoryBudgetHistory
+      ];
 }
 
 typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
@@ -3250,6 +3536,172 @@ typedef $$NotificationCapturesTableProcessedTableManager
         ),
         NotificationCapture,
         PrefetchHooks Function()>;
+typedef $$CategoryBudgetHistoryTableCreateCompanionBuilder
+    = CategoryBudgetHistoryCompanion Function({
+  required String id,
+  required String categoryId,
+  required int percent,
+  required int effectiveFrom,
+  Value<int> rowid,
+});
+typedef $$CategoryBudgetHistoryTableUpdateCompanionBuilder
+    = CategoryBudgetHistoryCompanion Function({
+  Value<String> id,
+  Value<String> categoryId,
+  Value<int> percent,
+  Value<int> effectiveFrom,
+  Value<int> rowid,
+});
+
+class $$CategoryBudgetHistoryTableFilterComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get percent => $composableBuilder(
+      column: $table.percent, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom, builder: (column) => ColumnFilters(column));
+}
+
+class $$CategoryBudgetHistoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get percent => $composableBuilder(
+      column: $table.percent, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom,
+      builder: (column) => ColumnOrderings(column));
+}
+
+class $$CategoryBudgetHistoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => column);
+
+  GeneratedColumn<int> get percent =>
+      $composableBuilder(column: $table.percent, builder: (column) => column);
+
+  GeneratedColumn<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom, builder: (column) => column);
+}
+
+class $$CategoryBudgetHistoryTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $CategoryBudgetHistoryTable,
+    CategoryBudgetEntry,
+    $$CategoryBudgetHistoryTableFilterComposer,
+    $$CategoryBudgetHistoryTableOrderingComposer,
+    $$CategoryBudgetHistoryTableAnnotationComposer,
+    $$CategoryBudgetHistoryTableCreateCompanionBuilder,
+    $$CategoryBudgetHistoryTableUpdateCompanionBuilder,
+    (
+      CategoryBudgetEntry,
+      BaseReferences<_$AppDatabase, $CategoryBudgetHistoryTable,
+          CategoryBudgetEntry>
+    ),
+    CategoryBudgetEntry,
+    PrefetchHooks Function()> {
+  $$CategoryBudgetHistoryTableTableManager(
+      _$AppDatabase db, $CategoryBudgetHistoryTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CategoryBudgetHistoryTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CategoryBudgetHistoryTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CategoryBudgetHistoryTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> categoryId = const Value.absent(),
+            Value<int> percent = const Value.absent(),
+            Value<int> effectiveFrom = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoryBudgetHistoryCompanion(
+            id: id,
+            categoryId: categoryId,
+            percent: percent,
+            effectiveFrom: effectiveFrom,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String categoryId,
+            required int percent,
+            required int effectiveFrom,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoryBudgetHistoryCompanion.insert(
+            id: id,
+            categoryId: categoryId,
+            percent: percent,
+            effectiveFrom: effectiveFrom,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$CategoryBudgetHistoryTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $CategoryBudgetHistoryTable,
+        CategoryBudgetEntry,
+        $$CategoryBudgetHistoryTableFilterComposer,
+        $$CategoryBudgetHistoryTableOrderingComposer,
+        $$CategoryBudgetHistoryTableAnnotationComposer,
+        $$CategoryBudgetHistoryTableCreateCompanionBuilder,
+        $$CategoryBudgetHistoryTableUpdateCompanionBuilder,
+        (
+          CategoryBudgetEntry,
+          BaseReferences<_$AppDatabase, $CategoryBudgetHistoryTable,
+              CategoryBudgetEntry>
+        ),
+        CategoryBudgetEntry,
+        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3261,4 +3713,6 @@ class $AppDatabaseManager {
       $$AppCategoriesTableTableManager(_db, _db.appCategories);
   $$NotificationCapturesTableTableManager get notificationCaptures =>
       $$NotificationCapturesTableTableManager(_db, _db.notificationCaptures);
+  $$CategoryBudgetHistoryTableTableManager get categoryBudgetHistory =>
+      $$CategoryBudgetHistoryTableTableManager(_db, _db.categoryBudgetHistory);
 }

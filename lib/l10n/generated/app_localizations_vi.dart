@@ -277,6 +277,9 @@ class AppLocalizationsVi extends AppLocalizations {
   String get analyticsSpendByCategoryTitle => 'Chi tiêu theo danh mục';
 
   @override
+  String get analyticsEnvelopeSectionTitle => 'Ngân sách theo danh mục';
+
+  @override
   String get analyticsEarnByCategoryTitle => 'Thu nhập theo danh mục';
 
   @override
@@ -576,6 +579,19 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get categoriesArchiveConfirmAction => 'Lưu trữ';
+
+  @override
+  String get categoriesBudgetPercentFieldOptional =>
+      'Tỷ lệ ngân sách (%, tùy chọn)';
+
+  @override
+  String categoriesBudgetPercentSubtitle(int percent) {
+    return 'Ngân sách $percent%';
+  }
+
+  @override
+  String get budgetPercentExceededError =>
+      'Tổng tỷ lệ ngân sách các danh mục vượt quá 100%.';
 
   @override
   String get themeTitle => 'Tuỳ chỉnh giao diện';

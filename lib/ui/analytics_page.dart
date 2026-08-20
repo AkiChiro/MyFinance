@@ -90,6 +90,18 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
     }
   }
 
+  /// Switches to Giao dịch pre-filtered to match what was tapped here —
+  /// same type, same category (if any), and scoped to the month currently
+  /// shown so the landed list sums to the figure that was tapped.
+  void _drillDown({required String type, String? category}) {
+    ref.read(txnTypeFilterProvider.notifier).state = type;
+    ref.read(txnCategoryFilterProvider.notifier).state = category;
+    ref.read(txnStarredOnlyProvider.notifier).state = false;
+    ref.read(monthModeProvider.notifier).state = true;
+    ref.read(selectedMonthProvider.notifier).state = _month;
+    ref.read(homeTabIndexProvider.notifier).state = 1; // Giao dịch tab
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
@@ -114,7 +126,10 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
               children: [
                 _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
                 const SizedBox(height: 12),
-                _SummaryCards(stats: s),
+                _SummaryCards(
+                  stats: s,
+                  onTotalTap: (type) => _drillDown(type: type),
+                ),
                 const SizedBox(height: 16),
                 _BarSection(stats: s, month: _month),
                 const SizedBox(height: 16),
@@ -125,9 +140,17 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
                     total: s.spending,
                     colorOf: spendColor,
                     catLabels: catLabels,
+                    onSliceTap: (category) =>
+                        _drillDown(type: TxTypes.spending, category: category),
                   ),
                   const SizedBox(height: 16),
                 ],
+                _EnvelopeSection(
+                  catLabels: catLabels,
+                  onRowTap: (category) =>
+                      _drillDown(type: TxTypes.spending, category: category),
+                ),
+                const SizedBox(height: 16),
                 if (s.earnByCat.isNotEmpty) ...[
                   _PieSection(
                     title: l10n.analyticsEarnByCategoryTitle,
@@ -135,6 +158,8 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
                     total: s.earning,
                     colorOf: earnColor,
                     catLabels: catLabels,
+                    onSliceTap: (category) =>
+                        _drillDown(type: TxTypes.earning, category: category),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -188,8 +213,9 @@ class _MonthPicker extends StatelessWidget {
 // Summary cards
 // ---------------------------------------------------------------------------
 class _SummaryCards extends StatelessWidget {
-  const _SummaryCards({required this.stats});
+  const _SummaryCards({required this.stats, required this.onTotalTap});
   final _Stats stats;
+  final void Function(String type) onTotalTap;
 
   @override
   Widget build(BuildContext context) {
@@ -210,6 +236,7 @@ class _SummaryCards extends StatelessWidget {
                   size: 16,
                   color: Theme.of(context).colorScheme.error),
               pct: _pct(stats.spending, stats.prevSpending),
+              onTap: () => onTotalTap(TxTypes.spending),
             ),
             const SizedBox(width: 8),
             _StatCard(
@@ -221,6 +248,7 @@ class _SummaryCards extends StatelessWidget {
                   size: 16,
                   color: Colors.green.shade700),
               pct: _pct(stats.earning, stats.prevEarning),
+              onTap: () => onTotalTap(TxTypes.earning),
             ),
           ],
         ),
@@ -266,44 +294,50 @@ class _StatCard extends StatelessWidget {
     required this.color,
     required this.icon,
     required this.pct,
+    this.onTap,
   });
   final String label;
   final String value;
   final Color color;
   final Widget icon;
   final double? pct;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return Expanded(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  icon,
-                  const SizedBox(width: 4),
-                  Text(label,
-                      style: Theme.of(context).textTheme.labelSmall),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(value,
-                  style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14)),
-              if (pct != null)
-                Text(l10n.analyticsPctSuffix(_signedPctStr(pct!)),
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
-                        ?.copyWith(color: Colors.grey)),
-            ],
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16), // matches main.dart's global CardThemeData shape
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: 4),
+                    Text(label,
+                        style: Theme.of(context).textTheme.labelSmall),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(value,
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14)),
+                if (pct != null)
+                  Text(l10n.analyticsPctSuffix(_signedPctStr(pct!)),
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: Colors.grey)),
+              ],
+            ),
           ),
         ),
       ),
@@ -486,12 +520,14 @@ class _PieSection extends StatefulWidget {
     required this.total,
     required this.colorOf,
     required this.catLabels,
+    this.onSliceTap,
   });
   final String title;
   final Map<String, int> data;
   final int total;
   final Color Function(String) colorOf;
   final Map<String, String> catLabels;
+  final void Function(String categoryId)? onSliceTap;
 
   @override
   State<_PieSection> createState() => _PieSectionState();
@@ -525,6 +561,13 @@ class _PieSectionState extends State<_PieSection> {
                     PieChartData(
                       pieTouchData: PieTouchData(
                         touchCallback: (event, response) {
+                          if (event is FlTapUpEvent) {
+                            final idx =
+                                response?.touchedSection?.touchedSectionIndex;
+                            if (idx != null && idx >= 0 && idx < entries.length) {
+                              widget.onSliceTap?.call(entries[idx].key);
+                            }
+                          }
                           setState(() {
                             if (!event.isInterestedForInteractions ||
                                 response == null ||
@@ -565,33 +608,38 @@ class _PieSectionState extends State<_PieSection> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: entries.map((e) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                  color: widget.colorOf(e.key),
-                                  shape: BoxShape.circle),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                widget.catLabels[e.key] ??
-                                    Categories.label(l10n, e.key),
-                                style: const TextStyle(fontSize: 12),
-                                overflow: TextOverflow.ellipsis,
+                      return InkWell(
+                        onTap: widget.onSliceTap == null
+                            ? null
+                            : () => widget.onSliceTap!(e.key),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                    color: widget.colorOf(e.key),
+                                    shape: BoxShape.circle),
                               ),
-                            ),
-                            Text(
-                              formatVnd(e.value),
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  widget.catLabels[e.key] ??
+                                      Categories.label(l10n, e.key),
+                                  style: const TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                formatVnd(e.value),
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
@@ -605,6 +653,85 @@ class _PieSectionState extends State<_PieSection> {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Envelope budgeting — per-category remaining "stack"
+// ---------------------------------------------------------------------------
+//
+// Unlike the rest of this page's data (_Stats/AnalyticsBundle, all month-
+// scoped), envelope balances are cumulative since forever — a category's
+// stack carries over month to month until spent — so this section keeps its
+// own subscription rather than being folded into _Stats. Minimal display
+// only (a plain list, no progress bars) — see docs/architecture.md for the
+// reasoning; visual treatment is expected to be refined separately.
+class _EnvelopeSection extends ConsumerWidget {
+  const _EnvelopeSection({required this.catLabels, required this.onRowTap});
+  final Map<String, String> catLabels;
+  final void Function(String categoryId) onRowTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
+    return StreamBuilder<Map<String, int>>(
+      stream: repo.watchEnvelopeBalances(),
+      builder: (context, snap) {
+        final balances = snap.data ?? const <String, int>{};
+        if (balances.isEmpty) return const SizedBox.shrink();
+        final errorColor = Theme.of(context).colorScheme.error;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l10n.analyticsEnvelopeSectionTitle,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                for (final entry in balances.entries)
+                  InkWell(
+                    onTap: () => onRowTap(entry.key),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                                color: spendColor(entry.key),
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              catLabels[entry.key] ??
+                                  Categories.label(l10n, entry.key),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          Text(
+                            formatVnd(entry.value),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: entry.value < 0 ? errorColor : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

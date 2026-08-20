@@ -98,6 +98,7 @@
   "analyticsNoData": "No data yet.",
   "analyticsMonthComparisonTitle": "Month comparison",
   "analyticsSpendByCategoryTitle": "Spending by category",
+  "analyticsEnvelopeSectionTitle": "Budget by category",
   "analyticsEarnByCategoryTitle": "Income by category",
   "analyticsCategoryTotal": "Total: {total}",
   "@analyticsCategoryTotal": { "placeholders": { "total": { "type": "String" } } },
@@ -198,6 +199,10 @@
   "@categoriesArchiveConfirmTitle": { "placeholders": { "label": { "type": "String" } } },
   "categoriesArchiveConfirmBody": "The category will be hidden from pickers, but old transactions keep it.",
   "categoriesArchiveConfirmAction": "Archive",
+  "categoriesBudgetPercentFieldOptional": "Budget percent (%, optional)",
+  "categoriesBudgetPercentSubtitle": "Budget {percent}%",
+  "@categoriesBudgetPercentSubtitle": { "placeholders": { "percent": { "type": "int" } } },
+  "budgetPercentExceededError": "Budget percentages across categories exceed 100%.",
 
   "themeTitle": "Customize appearance",
   "themeResetAction": "Reset",

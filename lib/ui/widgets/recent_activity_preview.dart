@@ -1,4 +1,3 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,11 +10,11 @@ import '../category_colors.dart';
 
 const _kPreviewLimit = 5;
 
-/// A glance card above the wallet list: a trend sparkline plus the last few
-/// transactions. Slices the existing `watchTxns()` stream client-side rather
-/// than adding a dedicated bounded query — dataset sizes here are trivially
-/// small for a single-user offline app. Hides entirely once there is no
-/// activity yet (the empty-wallets state already guides new users).
+/// A glance card above the wallet list: a net-change summary plus the last
+/// few transactions. Slices the existing `watchTxns()` stream client-side
+/// rather than adding a dedicated bounded query — dataset sizes here are
+/// trivially small for a single-user offline app. Hides entirely once there
+/// is no activity yet (the empty-wallets state already guides new users).
 class RecentActivityPreview extends ConsumerWidget {
   const RecentActivityPreview({super.key, required this.walletMap});
   final Map<String, String> walletMap;
@@ -31,7 +30,7 @@ class RecentActivityPreview extends ConsumerWidget {
         final all = snap.data ?? const [];
         if (all.isEmpty) return const SizedBox.shrink();
         final recent = all.take(_kPreviewLimit).toList();
-        final trend = _trendOf(recent);
+        final netChange = _netChangeOf(recent);
 
         return Card(
           child: Padding(
@@ -56,20 +55,18 @@ class RecentActivityPreview extends ConsumerWidget {
                           text: l10n.walletsRecentActivitySubtitle(recent.length)),
                       const TextSpan(text: '  ·  '),
                       TextSpan(
-                        text: formatSigned(trend.netChange.abs(),
-                            negative: trend.netChange < 0,
+                        text: formatSigned(netChange.abs(),
+                            negative: netChange < 0,
                             symbol: settings.currencySymbol,
                             suffix: settings.currencySuffix),
                         style: TextStyle(
-                          color: _trendColor(context, trend.netChange),
+                          color: _trendColor(context, netChange),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 6),
-                _TrendSparkline(trend: trend),
                 const Divider(height: 16),
                 for (final t in recent)
                   _RecentTile(txn: t, walletMap: walletMap, l10n: l10n),
@@ -83,81 +80,25 @@ class RecentActivityPreview extends ConsumerWidget {
   }
 }
 
-/// Cumulative signed-amount running total, oldest→newest, plus the final net
-/// change. Transfers move money between the user's own wallets — net zero on
-/// overall balance, so they don't move the trend line.
-class _Trend {
-  const _Trend(this.spots, this.netChange);
-  final List<FlSpot> spots;
-  final int netChange;
-}
-
-_Trend _trendOf(List<Txn> newestFirst) {
-  final oldestFirst = newestFirst.reversed.toList();
+/// Net signed-amount change across [recentTxns]. Transfers move money
+/// between the user's own wallets — net zero on overall balance, so they
+/// don't contribute.
+int _netChangeOf(List<Txn> recentTxns) {
   var running = 0;
-  final spots = <FlSpot>[];
-  for (var i = 0; i < oldestFirst.length; i++) {
-    running += switch (oldestFirst[i].type) {
-      TxTypes.earning => oldestFirst[i].amount,
-      TxTypes.spending => -oldestFirst[i].amount,
+  for (final t in recentTxns) {
+    running += switch (t.type) {
+      TxTypes.earning => t.amount,
+      TxTypes.spending => -t.amount,
       _ => 0,
     };
-    spots.add(FlSpot(i.toDouble(), running.toDouble()));
   }
-  return _Trend(spots, running);
+  return running;
 }
 
 Color _trendColor(BuildContext context, int netChange) {
   if (netChange > 0) return Colors.green.shade700;
   if (netChange < 0) return Theme.of(context).colorScheme.error;
   return Theme.of(context).colorScheme.primary;
-}
-
-class _TrendSparkline extends StatelessWidget {
-  const _TrendSparkline({required this.trend});
-  final _Trend trend;
-
-  @override
-  Widget build(BuildContext context) {
-    if (trend.spots.length < 2) return const SizedBox(height: 44);
-    final color = _trendColor(context, trend.netChange);
-    final ys = trend.spots.map((s) => s.y);
-    final maxAbs = [0.0, ...ys.map((y) => y.abs())].reduce((a, b) => a > b ? a : b);
-    // Pad the range so the zero reference line never sits flush on an edge.
-    final pad = maxAbs == 0 ? 1.0 : maxAbs * 0.2;
-    return SizedBox(
-      height: 44,
-      child: LineChart(
-        LineChartData(
-          minY: -maxAbs - pad,
-          maxY: maxAbs + pad,
-          titlesData: const FlTitlesData(show: false),
-          gridData: const FlGridData(show: false),
-          borderData: FlBorderData(show: false),
-          lineTouchData: const LineTouchData(enabled: false),
-          extraLinesData: ExtraLinesData(horizontalLines: [
-            HorizontalLine(
-              y: 0,
-              color: Theme.of(context).colorScheme.outlineVariant,
-              strokeWidth: 1,
-              dashArray: [4, 4],
-            ),
-          ]),
-          lineBarsData: [
-            LineChartBarData(
-              spots: trend.spots,
-              isCurved: true,
-              color: color,
-              barWidth: 2,
-              dotData: const FlDotData(show: false),
-              belowBarData:
-                  BarAreaData(show: true, color: color.withValues(alpha: 0.12)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _RecentTile extends ConsumerWidget {

@@ -278,6 +278,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analyticsSpendByCategoryTitle => 'Spending by category';
 
   @override
+  String get analyticsEnvelopeSectionTitle => 'Budget by category';
+
+  @override
   String get analyticsEarnByCategoryTitle => 'Income by category';
 
   @override
@@ -577,6 +580,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get categoriesArchiveConfirmAction => 'Archive';
+
+  @override
+  String get categoriesBudgetPercentFieldOptional =>
+      'Budget percent (%, optional)';
+
+  @override
+  String categoriesBudgetPercentSubtitle(int percent) {
+    return 'Budget $percent%';
+  }
+
+  @override
+  String get budgetPercentExceededError =>
+      'Budget percentages across categories exceed 100%.';
 
   @override
   String get themeTitle => 'Customize appearance';

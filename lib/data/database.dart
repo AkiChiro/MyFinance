@@ -102,6 +102,26 @@ class AppCategories extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Append-only history of per-(spending-)category budget-split percentages
+/// (envelope budgeting). A new row is inserted whenever the user changes a
+/// category's percentage; existing rows are never updated or deleted. Reads
+/// pick the row with the largest effectiveFrom <= a given earning's own
+/// timestamp (an "as-of" join) — this makes percentage changes non-
+/// retroactive by construction: past envelope allocations are always
+/// computed from whatever percentage was in effect at the time, never
+/// today's percentage. Mirrors wallets.balanceCutoffAt's point-in-time
+/// cutover idea, but as a full history instead of a single mutable column.
+@DataClassName('CategoryBudgetEntry')
+class CategoryBudgetHistory extends Table {
+  TextColumn get id => text()();
+  TextColumn get categoryId => text()();
+  IntColumn get percent => integer()(); // 0-100, whole percent of each earning
+  IntColumn get effectiveFrom => integer()(); // Unix seconds
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ── AnalyticsBundle ───────────────────────────────────────────────────────────
 
 /// Pre-aggregated analytics data for a given month, produced by SQL aggregates.
@@ -131,7 +151,13 @@ class AnalyticsBundle {
 
 // ── Database ──────────────────────────────────────────────────────────────────
 
-@DriftDatabase(tables: [Wallets, Txns, AppCategories, NotificationCaptures])
+@DriftDatabase(tables: [
+  Wallets,
+  Txns,
+  AppCategories,
+  NotificationCaptures,
+  CategoryBudgetHistory,
+])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
@@ -139,13 +165,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
           await _seedCategories();
+          await _seedBudgetPercents();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -209,6 +236,29 @@ class AppDatabase extends _$AppDatabase {
               'ALTER TABLE wallets ADD COLUMN balance_cutoff_at INTEGER NULL',
             );
           }
+          if (from < 8) {
+            // Envelope budgeting: append-only percent-history table. Raw SQL —
+            // database.g.dart doesn't have CategoryBudgetHistory's generated
+            // accessor yet at migration-authoring time.
+            await customStatement('''
+              CREATE TABLE IF NOT EXISTS category_budget_history (
+                id TEXT NOT NULL PRIMARY KEY,
+                category_id TEXT NOT NULL,
+                percent INTEGER NOT NULL,
+                effective_from INTEGER NOT NULL
+              )
+            ''');
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_budget_history_cat_eff '
+              'ON category_budget_history(category_id, effective_from)',
+            );
+            // Deliberately NO seed rows here. Percentage changes are never
+            // retroactive (see the class doc-comment), so there is no
+            // percentage that was ever "in effect" for pre-existing installs
+            // — every category reads as unbudgeted until the user explicitly
+            // sets one. Contrast with _seedBudgetPercents(), which only runs
+            // for brand-new installs via onCreate.
+          }
         },
       );
 
@@ -235,6 +285,31 @@ class AppDatabase extends _$AppDatabase {
           threshold: Value(threshold),
           isDefault: const Value(true),
           sortOrder: Value(order),
+        ),
+      );
+    }
+  }
+
+  /// Default envelope-budget split for fresh installs only (never run on
+  /// upgrade — see the `if (from < 8)` migration comment above). Mirrors the
+  /// feature's own worked example: necessities 50 / food 15 / hobbies 20 /
+  /// others 15 = 100%. effectiveFrom = 0 (Unix epoch) so the default applies
+  /// to any earning timestamp — a fresh install has no prior history to
+  /// preserve, so unlike the upgrade path there is no retroactivity concern.
+  Future<void> _seedBudgetPercents() async {
+    final seeds = [
+      ('necessities', 50),
+      ('food', 15),
+      ('hobbies', 20),
+      ('others', 15),
+    ];
+    for (final (categoryId, percent) in seeds) {
+      await into(categoryBudgetHistory).insertOnConflictUpdate(
+        CategoryBudgetHistoryCompanion.insert(
+          id: '${categoryId}_seed',
+          categoryId: categoryId,
+          percent: percent,
+          effectiveFrom: 0,
         ),
       );
     }
@@ -421,6 +496,96 @@ class AppDatabase extends _$AppDatabase {
         for (final r in eaRows) r.read<String>('cat'): r.read<int>('total')
       },
     );
+  }
+
+  // ── Envelope budgeting ───────────────────────────────────────────────────────
+
+  /// Every history row, unfolded (not just the current-effective value) —
+  /// used by CSV export for a complete backup of the percent timeline.
+  Future<List<CategoryBudgetEntry>> allCategoryBudgetHistory() =>
+      select(categoryBudgetHistory).get();
+
+  /// Current effective budget percent for every category that has ever had
+  /// one configured, keyed by categoryId. A category with no history row is
+  /// simply absent (callers treat missing as 0%). The table only grows on
+  /// user edits (realistically tens of rows over the app's lifetime), so
+  /// folding "latest effectiveFrom wins" in Dart is simpler than a SQL
+  /// self-join and avoids an awkward tie-break on equal timestamps.
+  Future<Map<String, int>> categoryBudgetPercents() async {
+    final rows = await customSelect(
+      'SELECT category_id, percent FROM category_budget_history ORDER BY effective_from',
+      readsFrom: {categoryBudgetHistory},
+    ).get();
+    final result = <String, int>{};
+    for (final r in rows) {
+      result[r.read<String>('category_id')] = r.read<int>('percent');
+    }
+    return result;
+  }
+
+  Stream<Map<String, int>> watchCategoryBudgetPercents() async* {
+    yield await categoryBudgetPercents();
+    await for (final _
+        in tableUpdates(TableUpdateQuery.onTable(categoryBudgetHistory))) {
+      yield await categoryBudgetPercents();
+    }
+  }
+
+  /// Reactive {categoryId → envelope balance}, cumulative since forever (not
+  /// month-scoped like AnalyticsBundle). Re-emits on any change to txns,
+  /// category_budget_history, or app_categories (e.g. editing a % or
+  /// archiving a category in CategoriesPage) — watchAnalyticsBundle only
+  /// listens to txns, which would silently miss those two.
+  Stream<Map<String, int>> watchEnvelopeBalances() async* {
+    yield await _buildEnvelopeBalances();
+    await for (final _ in tableUpdates(TableUpdateQuery.allOf([
+      TableUpdateQuery.onTable(txns),
+      TableUpdateQuery.onTable(categoryBudgetHistory),
+      TableUpdateQuery.onTable(appCategories),
+    ]))) {
+      yield await _buildEnvelopeBalances();
+    }
+  }
+
+  Future<Map<String, int>> _buildEnvelopeBalances() async {
+    // Earned share per active spending category. The inner correlated
+    // subquery is an "as-of" join: the single most recent history row for
+    // this category at-or-before each earning's own timestamp — this is
+    // what makes a % change apply only to income recorded after the change.
+    // COALESCE(...,0) means "no applicable row yet" contributes $0, so an
+    // earning older than any configured percent needs no special-casing.
+    final earnedRows = await customSelect('''
+      SELECT c.id AS category_id,
+        COALESCE((
+          SELECT SUM(e.amount * COALESCE((
+            SELECT bh.percent FROM category_budget_history bh
+            WHERE bh.category_id = c.id AND bh.effective_from <= e.timestamp
+            ORDER BY bh.effective_from DESC LIMIT 1
+          ), 0))
+          FROM txns e WHERE e.type = 'earning' AND e.affects_balance = 1
+        ), 0) AS earned_x100
+      FROM app_categories c
+      WHERE c.kind = 'spending' AND c.archived = 0
+      ''', readsFrom: {appCategories, txns, categoryBudgetHistory}).get();
+
+    // Spent per category, ALL-TIME. Unlike analytics (which intentionally
+    // ignores affects_balance — see docs/architecture.md), envelopes filter
+    // affects_balance=1: they track real money only, not CSV context-only
+    // rows. Transfers are excluded "for free" (never type='spending').
+    final spentRows = await customSelect('''
+      SELECT COALESCE(category, 'others') AS cat, SUM(amount) AS total
+      FROM txns WHERE type = 'spending' AND affects_balance = 1
+      GROUP BY cat
+      ''', readsFrom: {txns}).get();
+    final spentByCat = {
+      for (final r in spentRows) r.read<String>('cat'): r.read<int>('total')
+    };
+
+    return {
+      for (final r in earnedRows)
+        r.read<String>('category_id'): (r.read<int>('earned_x100') ~/ 100) -
+            (spentByCat[r.read<String>('category_id')] ?? 0)
+    };
   }
 
   // ── Categories ────────────────────────────────────────────────────────────────

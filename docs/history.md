@@ -172,6 +172,9 @@ The alternative (briefly open the app, run the dismiss, show nothing) is simpler
 **ADR-0019 — Single CSV file, record-type-discriminator rows, instead of per-entity files/headers**
 Once export needed to cover wallets + transactions + categories + settings + keyword rules (all different column shapes) in one file, a per-section-header format (like a multi-sheet spreadsheet) would need custom line-splitting to parse. Prefixing every row with a type tag (`WALLET,...` / `TXN,...` / ...) instead lets the whole file go through one `CsvToListConverter`/`ListToCsvConverter` pass — rows are just grouped by `row[0]` after parsing. Chosen over keeping multiple files (harder to share as one backup) or switching export to JSON (user asked for CSV specifically).
 
+**ADR-0020 — Envelope budgeting: recompute-on-read from an append-only percent-history table, not a stored/mutated ledger**
+The alternative (a snapshot table writing an allocation row per earning, reversed on edit/delete) would need all five transaction-mutation call sites touched (`addSpending`/`addEarning`/`updateTxn`/`deleteTxn`/`confirmCapture`, plus a new `db.transaction()` wrapper on `addEarning`, which doesn't have one today) and directly fights ADR-0004's "never store a mutable balance — risks drifting out of sync" reasoning, just applied to a category-tagged sub-balance of income instead of a wallet balance. Recompute-on-read gets three product requirements essentially for free: a percent change is just a new `category_budget_history` row, read via an "as-of" join against each earning's own timestamp, so it's never retroactive; there's no write path to hang an overspend guard on, so overspending an envelope can only ever be informational; and an earning older than any configured percent naturally contributes $0, so no backfill migration is needed when a percent is first set post-upgrade.
+
 ---
 
 ## Device testing results (Phase 5, V0.2-Improve branch)
@@ -508,3 +511,114 @@ On-device testing (notification popup, cold-start "Thêm"/"Bỏ qua", CSV round-
 **Problem:** on first real-device test, tapping a `.csv` file listed under a Google Drive location in the system file picker did nothing — the file appeared greyed out/unselectable. This was **not new** in this session; the picker call (`FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv'])`) was carried over unchanged from the old `_importMerge`/`_importReplace` flows. `FileType.custom` + `allowedExtensions` asks Android's Storage Access Framework document picker to filter by MIME type; cloud-provider-listed files (Google Drive here) frequently don't report the exact MIME type the filter expects, so SAF disables them even though the extension is correct — a well-known `file_picker`/Android limitation, not an app logic bug.
 
 **Fix:** `lib/ui/settings_page.dart`'s `_import()` now calls `FilePicker.platform.pickFiles(type: FileType.any)` (no MIME filter, so every file stays selectable regardless of provider-reported MIME type) and validates the `.csv` extension in code afterward, showing `l10n.settingsCsvWrongFileType` if it doesn't match.
+
+---
+
+## Session 10 — Sparkline removal, Analytics drill-down, combined filter chip (Branch: V0.2-Improve)
+
+On-device feedback after Session 8's redesign: the Ví tab's new Recent Activity sparkline didn't carry enough information to earn its space, the Thống kê tab's totals/categories were dead ends, and Giao dịch's Chi tiêu/Thu nhập/Danh mục three-chip filter setup cost an extra tap for the common "filter to one category" flow.
+
+### 1. Sparkline removed from Recent Activity
+
+`lib/ui/widgets/recent_activity_preview.dart`: deleted `_TrendSparkline` and the `_Trend`/`_trendOf` machinery that fed its `FlSpot` series (collapsed to a single `_netChangeOf(recentTxns) → int` the caption still needs); removed the now-fully-dead `fl_chart` import from this file (still used elsewhere, e.g. `analytics_page.dart`). The net-change caption line above where the chart used to sit ("Qua N giao dịch gần nhất · ±X ₫") was **kept** — it turned out to be the actually-useful part; the chart was only ever added to give that caption context.
+
+### 2. Analytics → Transactions drill-down
+
+**Problem:** `AnalyticsPage`'s totals and pie slices were read-only — no way to jump to the underlying transactions.
+
+**Architectural prerequisite:** `AnalyticsPage` needed to switch `HomePage`'s active tab and preset `TransactionsPage`'s filters, but neither was reachable (tab index was `HomePage`-local `State`; filters were `TransactionsPage`-local `State`). Extended the existing `monthModeProvider`/`selectedMonthProvider` pattern (cross-widget UI state → `StateProvider`, not local `State`) with four more providers in `lib/providers.dart`: `homeTabIndexProvider` (replaces `HomePage`'s local `_index` entirely), `txnTypeFilterProvider`, `txnCategoryFilterProvider`, `txnStarredOnlyProvider` (the last one added so a drill-down can reset a stale "Có sao" filter left over from a prior manual Giao dịch session — otherwise the landed list could be a strict subset of what actually summed to the tapped figure). `_sortDirection` stayed `TransactionsPage`-local — it reorders, never hides rows.
+
+**`_AnalyticsPageState._drillDown({required type, category})`**: writes `txnTypeFilterProvider`, `txnCategoryFilterProvider`, resets `txnStarredOnlyProvider` to `false`, sets `monthModeProvider = true` and `selectedMonthProvider = _month` (required, not optional — `_StatCard`/`_PieSection` figures are scoped to the month being viewed, not all-time), then `homeTabIndexProvider = 1`. Wired from:
+- `_StatCard` (Tổng chi/Tổng thu) — new `onTap: VoidCallback?`, `Card(child: InkWell(borderRadius: BorderRadius.circular(16), onTap: onTap, child: ...))` (radius matches `main.dart`'s global `CardThemeData`).
+- `_PieSection` — new `onSliceTap: void Function(String categoryId)?`, wired into both the pie chart (`pieTouchData.touchCallback` gained an `if (event is FlTapUpEvent)` branch, additive to the existing highlight-on-touch logic — `isInterestedForInteractions` is `false` for taps specifically on mobile, confirmed via the installed fl_chart 0.69.2 source, so the new branch can't reuse that guard) and each legend row (wrapped in `InkWell`). Both index into the same `entries` list that drives the pie sections, so `entries[i].key` is the category id either way.
+
+**Category-coalescing fix** (`transactions_page.dart`'s filter chain): `'others'`/`'others_earn'` are simultaneously the real seeded ids of the default "Khác" categories *and* the analytics SQL's `COALESCE(category, 'others'|'others_earn')` bucket for `category IS NULL` rows (reachable via `CaptureConfirmPage`'s "— Bỏ qua —" option). The old exact-match filter (`t.category == categoryFilter`) didn't do this coalescing, so drilling into (or even just manually filtering by) "Khác" would have silently omitted uncategorized transactions the analytics total already counted. Fixed by comparing `(t.category ?? (t.type == TxTypes.earning ? 'others_earn' : 'others')) == categoryFilter` instead — mirrors the SQL exactly.
+
+**Scope boundary:** only the two stat cards and the two pie sections drill down. `_YearCard` and the "Chênh lệch tháng này" comparison card stay non-interactive — not requested.
+
+### 3. Combined type+category filter chip
+
+**Problem:** filtering to one category took two taps — select Chi tiêu/Thu nhập, then a separate Danh mục chip that only appeared once a type was active.
+
+**Solution:** `transactions_page.dart`'s `_buildFilterBar` replaces the "Chi tiêu"/"Thu nhập" `ChoiceChip`s and the conditional "Danh mục" `FilterChip` (three elements) with a `typeCategoryChip()` helper local to `_buildFilterBar` (closes over `context`/`catLabels`/`l10n`/`ref` for free) that builds one combo-chip per type:
+- Inactive: plain type label, `showCheckmark: false`.
+- First tap (inactive → active): sets the type filter, clears that type's category, reveals a trailing `Icons.arrow_drop_down`.
+- Second tap (already active): opens `_pickCategory()` instead of toggling — `categoriesForType` is computed per chip from that chip's own fixed type, not the shared filter state, since the picker can only ever open for the type that's already active.
+- After picking, the label swaps from the type name to the category's label (arrow stays); picking "Tất cả" reverts to the plain type label.
+
+Chip row order shifted as a forced consequence (Danh mục no longer exists as a separate element): Tất cả/Tháng → Chi tiêu-combo → Thu nhập-combo → Có sao → Sort.
+
+`_starredOnly`/`_typeFilter`/`_categoryFilter` (previously local `State`, now the providers from §2) are read via `ref.watch` and written via `ref.read(...notifier).state =` at every mutation site — the two combo-chips, the Có sao chip, and `_pickCategory`'s result handling.
+
+### Verification
+
+`flutter analyze`: 0 new issues, same 2 pre-existing `use_build_context_synchronously` infos in `quick_add_page.dart` and the same pre-existing `sortOrder`-related test-loading errors already tracked in Sessions 8/9 (confirmed unrelated via `git diff` — none of `test/balance_test.dart`/`test/auto_star_test.dart` touched). `flutter test`: same pre-existing 3 failures, no new ones. Full debug APK build succeeded.
+
+On-device re-verification of the specific interactions this session touched (drill-down from both stat cards and both pie sections including a "Khác" slice, the combo-chip's two-tap flow, tab-switch/swipe still working after the `_index` lift) was **not** performed as part of writing this entry — flagged for the user, per the project's usual on-device test checklist.
+
+### Key files changed in this session
+
+| File | Change |
+|------|--------|
+| `lib/providers.dart` | 4 new `StateProvider`s: `homeTabIndexProvider`, `txnTypeFilterProvider`, `txnCategoryFilterProvider`, `txnStarredOnlyProvider` |
+| `lib/ui/home_page.dart` | `_index` local `State` → `homeTabIndexProvider` |
+| `lib/ui/transactions_page.dart` | Filter state → providers; `_buildFilterBar` combo-chip rebuild; category-coalescing predicate fix |
+| `lib/ui/analytics_page.dart` | `_drillDown()`; `_StatCard`/`_SummaryCards` gained `onTap`/`onTotalTap`; `_PieSection` gained `onSliceTap` (pie touch + legend rows) |
+| `lib/ui/widgets/recent_activity_preview.dart` | Sparkline removed; `_Trend`/`_trendOf` simplified to `_netChangeOf` |
+
+---
+
+## Session 11 — Envelope budgeting (Branch: V0.2-Improve)
+
+User request: assign each spending category a % of every income; the category's "envelope" balance is that accumulated share minus what's been spent in it, so the Thống kê tab can show whether there's still budget left per category. Three product decisions were confirmed with the user up front (see ADR-0020 above for the architecture they drove): percentage changes are **not retroactive**; overspending an envelope is **informational only**, never blocking; budget percentages must sum to **≤100%**, not exactly 100%.
+
+### Schema v8 — `category_budget_history`
+
+New append-only table: `id, category_id, percent (0-100), effective_from (Unix seconds)`. A percent edit always inserts a new row, never updates one. Migration (`if (from < 8)`) is raw `CREATE TABLE`/`CREATE INDEX` — following the v6/v7 precedent, since `database.g.dart` doesn't have the generated accessor yet at migration-authoring time. Deliberately seeds **nothing** on the upgrade path (no percent was ever "in effect" for pre-existing installs); `onCreate` only (fresh installs) seeds necessities/food/hobbies/others at 50/15/20/15 via a new `_seedBudgetPercents()`, matching the feature's own worked example.
+
+### `AppDatabase` (`lib/data/database.dart`)
+
+- `categoryBudgetPercents()`/`watchCategoryBudgetPercents()` — folds the history table to `{categoryId → current effective percent}` in Dart (latest `effectiveFrom` wins; the table only grows on user edits, realistically tens of rows, so a Dart fold beats an awkward SQL self-join tie-break).
+- `allCategoryBudgetHistory()` — every row, unfolded, for CSV export completeness.
+- `watchEnvelopeBalances()`/`_buildEnvelopeBalances()` — two `customSelect` queries glued in Dart (mirrors `_buildAnalyticsBundle`'s own multi-query shape): an "as-of" correlated subquery finds, per earning, the most recent `category_budget_history` row at-or-before that earning's own `timestamp`; a second query sums spending per category (`COALESCE(category,'others')`, matching analytics' fallback). Both filter `type`+`affects_balance=1` — unlike analytics, envelopes track real money only. Listens for changes on `txns`, `category_budget_history`, **and** `app_categories` (`TableUpdateQuery.allOf([...])` — its doc-comment says "matches any query in the list," i.e. OR semantics despite the name) — `watchAnalyticsBundle` only listens to `txns`, which would silently miss a percent edit or an archive toggle.
+
+### `FinanceRepository`
+
+- `BudgetPercentExceededException` — zero-payload, mirrors `OverspendException` exactly (same "repository is the one choke point" reasoning as the "no direct DB access from UI" rule).
+- `setCategoryBudgetPercent(categoryId, percent)` — sums `percent` against every *other* active spending category's current percent (the target's own prior value is excluded, not double-counted); throws if the sum exceeds 100. Always inserts a new history row on success (even if the value is unchanged — still correct, since "no-op" isn't meaningfully different from "re-affirm the same allocation from now on").
+- `addCategory` changed from `Future<void>` → `Future<String>` (returns the new id) — mirrors the earlier `addWallet` precedent — so the add-category dialog can immediately call `setCategoryBudgetPercent` on a category that didn't exist a moment before.
+
+### UI (minimal — per this chat's business-logic scope; visual polish left to the other chat)
+
+- `lib/ui/categories_page.dart`: a % `TextField`, conditional on `kind == TxTypes.spending`, sibling to the existing threshold field in both add/edit dialogs (same conditional-field pattern). Both dialogs wrapped in `StatefulBuilder` so a caught `BudgetPercentExceededException` can show an inline `errorText` without losing the user's typed values or closing the dialog. The category list wraps its existing `StreamBuilder<List<AppCategory>>` with an outer `StreamBuilder<Map<String,int>>` (`watchCategoryBudgetPercents()`) to show/prefill current percents.
+- `lib/ui/analytics_page.dart`: new `_EnvelopeSection` (plain list, `spendColor` dot + label + `formatVnd(balance)`, red when negative) added after the spend-by-category `_PieSection`. Not month-scoped like the rest of the page, so it keeps its own `StreamBuilder` rather than folding into `_Stats`. Reuses the `catLabels` map already computed once in `_AnalyticsPageState.build()`, and reuses the *existing* `_drillDown(type, category)` (Session 10) for row taps rather than inventing a second navigation path — this session was re-checked against Session 10's concurrent changes before writing any analytics_page.dart code, specifically so the two didn't collide.
+
+### CSV (`lib/services/csv_service.dart`)
+
+New `BUDGET,id,category_id,percent,effective_from` record type — export-only (like `CATEGORY`/`SETTING`/`KEYWORD`), sourced from `allCategoryBudgetHistory()`. `importAll()` needed no change — unrecognized record types were already silently skipped.
+
+### Testing
+
+`test/envelope_budget_test.dart` (new, 18 tests): SQL-vs-Dart-oracle-style correctness tests (the worked example; percent-change-mid-timeline proving non-retroactivity; envelope-goes-negative-without-blocking; null-category/`affects_balance=0`/transfer exclusions; pre-configuration earnings contribute $0; archived-category exclusion; <100% leftover; `updateTxn`/`deleteTxn` on an earning correctly changes the next read with zero code touching either method) plus a 3-part invariant-guard suite for `setCategoryBudgetPercent` (boundary-pass/exceed/atomicity, self-exclusion, archived-exclusion).
+
+**Reactivity-test gotcha worth remembering**: the first attempt at the three "stream re-emits on X" tests used `StreamIterator`, and all three timed out even with a settle delay — not a bug in `watchEnvelopeBalances()`, but `StreamIterator` pausing its underlying subscription between `moveNext()` calls, which for an `async*` generator also suspends the generator body — it never reached its inner `await for (tableUpdates(...))` before the test's mutation fired, so the notification was missed permanently. Fixed by switching the test to a plain `.listen()` collecting events into a list. A live `StreamBuilder` in the running app never pauses like this, so production code was never at risk — this was purely a test-consumption-pattern bug.
+
+`test/migration_test.dart`: extended the existing v2→v3 test with one more assertion (`category_budget_history` is empty after the cascade-upgrade — proves no retroactive seeding) rather than hand-writing a new v7-schema replica, since `onUpgrade` runs every `if (from < N)` block in sequence regardless of starting version, so reopening the v2 seed with the current `AppDatabase` already exercises v8 too. Added one small standalone test confirming fresh installs seed 50/15/20/15.
+
+### Verification
+
+`flutter analyze`: 0 new issues (same 2 pre-existing `quick_add_page.dart` infos). `flutter test`: same 3 pre-existing failures already tracked since Session 8/9 (`test/balance_test.dart`/`test/auto_star_test.dart` load errors, one stale `sql_analytics_test.dart` assertion) — confirmed identical failure signatures, nothing new. All 20 new tests pass.
+
+On-device testing (setting percentages that sum near 100%, confirming a real earning splits correctly, confirming a percent change doesn't reshape past income, confirming an over-budget spend still saves) was **not** performed as part of this session — flagged for the user per the project's usual on-device test checklist.
+
+### Key files changed in this session
+
+| File | Change |
+|------|--------|
+| `lib/data/database.dart` | `CategoryBudgetHistory` table; schema v8 migration; `_seedBudgetPercents()`; `categoryBudgetPercents`/`watchCategoryBudgetPercents`/`allCategoryBudgetHistory`/`watchEnvelopeBalances`/`_buildEnvelopeBalances` |
+| `lib/repositories/finance_repository.dart` | `BudgetPercentExceededException`; `setCategoryBudgetPercent`; `addCategory` now returns the new id; two stream pass-throughs |
+| `lib/ui/categories_page.dart` | % field in add/edit dialogs (`StatefulBuilder` for inline errors); nested `StreamBuilder` for current percents |
+| `lib/ui/analytics_page.dart` | New `_EnvelopeSection`, wired to the existing `_drillDown` |
+| `lib/services/csv_service.dart` | `BUDGET` export-only row type |
+| `lib/l10n/app_vi.arb`, `app_en.arb` | 4 new keys: category %-field label/subtitle, `budgetPercentExceededError`, `analyticsEnvelopeSectionTitle` |
+| `test/envelope_budget_test.dart` (new), `test/migration_test.dart` | see Testing above |

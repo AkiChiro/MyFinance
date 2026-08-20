@@ -584,6 +584,12 @@ abstract class AppLocalizations {
   /// **'Chi tiêu theo danh mục'**
   String get analyticsSpendByCategoryTitle;
 
+  /// No description provided for @analyticsEnvelopeSectionTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Ngân sách theo danh mục'**
+  String get analyticsEnvelopeSectionTitle;
+
   /// No description provided for @analyticsEarnByCategoryTitle.
   ///
   /// In vi, this message translates to:
@@ -1100,6 +1106,24 @@ abstract class AppLocalizations {
   /// In vi, this message translates to:
   /// **'Lưu trữ'**
   String get categoriesArchiveConfirmAction;
+
+  /// No description provided for @categoriesBudgetPercentFieldOptional.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tỷ lệ ngân sách (%, tùy chọn)'**
+  String get categoriesBudgetPercentFieldOptional;
+
+  /// No description provided for @categoriesBudgetPercentSubtitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Ngân sách {percent}%'**
+  String categoriesBudgetPercentSubtitle(int percent);
+
+  /// No description provided for @budgetPercentExceededError.
+  ///
+  /// In vi, this message translates to:
+  /// **'Tổng tỷ lệ ngân sách các danh mục vượt quá 100%.'**
+  String get budgetPercentExceededError;
 
   /// No description provided for @themeTitle.
   ///

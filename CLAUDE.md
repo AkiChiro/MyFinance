@@ -39,7 +39,7 @@ Native        android_overlay/       Kotlin: BankCaptureService, CaptureChannelA
 
 ---
 
-## Database schema (v7)
+## Database schema (v8)
 
 ### `wallets`
 | Column | Type | Notes |
@@ -60,6 +60,9 @@ Deferred capture inbox — see `docs/architecture.md` for full schema.
 
 ### `app_categories`
 id, label, kind (`spending`/`earning`), threshold (VND auto-star limit), is_default, archived, sort_order
+
+### `category_budget_history`
+Append-only envelope-budgeting percent history: id, category_id, percent (0-100), effective_from (Unix seconds). New row per edit, never mutated — see Budget invariants below.
 
 ### Migration rules
 - **Additive only** — `ALTER TABLE ADD COLUMN`, never DROP or RENAME
@@ -83,6 +86,16 @@ id, label, kind (`spending`/`earning`), threshold (VND auto-star limit), is_defa
 - Only `affects_balance=1` rows count toward balance (CSV context-only imports have `affects_balance=0`).
 - `balance_cutoff_at` per wallet: only txns with `timestamp >= cutoff` are included. Resetting wallet A's initial balance sets its own cutoff — does **not** affect wallet B's view of shared transfer rows.
 - **Analytics ignores `affects_balance`** — all non-transfer txns appear in totals regardless of balance reset.
+
+---
+
+## Budget (envelope) invariants
+
+- Envelope balance is **derived, never stored** — same philosophy as balance (ADR-0004), applied to `category_budget_history` + `txns`. `addSpending`/`addEarning`/`updateTxn`/`deleteTxn`/`confirmCapture` need zero envelope-specific code.
+- `category_budget_history` is **append-only** — a % edit inserts a new row (`effectiveFrom = now`), never updates one. Reads take the row with the largest `effectiveFrom <= ` a given earning's own timestamp ("as-of" join), so a % change is **never retroactive**.
+- Only `type='earning'`/`'spending'` rows with `affects_balance=1` participate. Unlike analytics, envelopes **do** filter on `affects_balance` (they track real money only).
+- Overspending an envelope is informational only — never blocks a write (contrast with `OverspendException`/wallet balance).
+- `FinanceRepository.setCategoryBudgetPercent` blocks only if the new sum across **active** spending categories would exceed 100% (`BudgetPercentExceededException`) — summing to less than 100% is allowed.
 
 ---
 
@@ -138,6 +151,7 @@ Run `make apk` after **any** schema or Pigeon change before using typed accessor
 | Thống kê tab | `docs/tab_analytics.md` |
 | Cài đặt tab | `docs/tab_settings.md` |
 | Analytics computation change | `docs/architecture.md` — Analytics computation section |
+| Budget (envelope) UI or computation change | `docs/tab_analytics.md`, `docs/architecture.md` — Envelope budgeting section |
 | Any session of work | `docs/history.md` — append new session section |
 | Architectural decision | `docs/MyFinance_ADR.md` |
 

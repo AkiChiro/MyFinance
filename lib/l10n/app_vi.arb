@@ -98,6 +98,7 @@
   "analyticsNoData": "Chưa có dữ liệu.",
   "analyticsMonthComparisonTitle": "So sánh tháng",
   "analyticsSpendByCategoryTitle": "Chi tiêu theo danh mục",
+  "analyticsEnvelopeSectionTitle": "Ngân sách theo danh mục",
   "analyticsEarnByCategoryTitle": "Thu nhập theo danh mục",
   "analyticsCategoryTotal": "Tổng: {total}",
   "@analyticsCategoryTotal": { "placeholders": { "total": { "type": "String" } } },
@@ -198,6 +199,10 @@
   "@categoriesArchiveConfirmTitle": { "placeholders": { "label": { "type": "String" } } },
   "categoriesArchiveConfirmBody": "Danh mục sẽ ẩn khỏi lựa chọn nhưng giao dịch cũ vẫn giữ nguyên.",
   "categoriesArchiveConfirmAction": "Lưu trữ",
+  "categoriesBudgetPercentFieldOptional": "Tỷ lệ ngân sách (%, tùy chọn)",
+  "categoriesBudgetPercentSubtitle": "Ngân sách {percent}%",
+  "@categoriesBudgetPercentSubtitle": { "placeholders": { "percent": { "type": "int" } } },
+  "budgetPercentExceededError": "Tổng tỷ lệ ngân sách các danh mục vượt quá 100%.",
 
   "themeTitle": "Tuỳ chỉnh giao diện",
   "themeResetAction": "Đặt lại",

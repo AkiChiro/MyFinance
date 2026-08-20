@@ -31,15 +31,17 @@ const _rtTxn = 'TXN';
 const _rtCategory = 'CATEGORY';
 const _rtSetting = 'SETTING';
 const _rtKeyword = 'KEYWORD';
+const _rtBudget = 'BUDGET';
 const _schemaVersion = '1';
 
 /// Single-file CSV export/import.
 ///
 /// The file has no per-section header row — instead every row's first cell
-/// is a record-type discriminator (META/WALLET/TXN/CATEGORY/SETTING/KEYWORD),
-/// so heterogeneous "tables" round-trip through one `CsvToListConverter`
-/// pass. [importAll] only consumes WALLET and TXN rows; CATEGORY/SETTING/
-/// KEYWORD are exported for backup/documentation only.
+/// is a record-type discriminator
+/// (META/WALLET/TXN/CATEGORY/SETTING/KEYWORD/BUDGET), so heterogeneous
+/// "tables" round-trip through one `CsvToListConverter` pass. [importAll]
+/// only consumes WALLET and TXN rows; CATEGORY/SETTING/KEYWORD/BUDGET are
+/// exported for backup/documentation only.
 class CsvService {
   CsvService(this.db);
   final AppDatabase db;
@@ -58,6 +60,7 @@ class CsvService {
     final wallets = await db.allWallets();
     final txns = await db.allTxns();
     final categories = await db.allCategories();
+    final budgetHistory = await db.allCategoryBudgetHistory();
 
     final rows = <List<dynamic>>[
       [_rtMeta, 'schema_version', _schemaVersion],
@@ -105,6 +108,8 @@ class CsvService {
       for (final e in settingsEntries) [_rtSetting, e.key, e.value],
       for (final r in keywordRules)
         [_rtKeyword, r['keyword'] ?? '', r['category'] ?? '', r['weight'] ?? 0],
+      for (final b in budgetHistory)
+        [_rtBudget, b.id, b.categoryId, b.percent, b.effectiveFrom],
     ];
 
     final dir = await getTemporaryDirectory();
