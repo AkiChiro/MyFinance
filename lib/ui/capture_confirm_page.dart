@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
 
@@ -87,13 +88,14 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
 
   Future<void> _confirm(List<Wallet> wallets) async {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     final amount = parseAmount(_amount.text);
     if (amount <= 0) {
-      _snack('Vui lòng nhập số tiền hợp lệ.');
+      _snack(l10n.quickAddInvalidAmount);
       return;
     }
     if (_walletId == null) {
-      _snack('Vui lòng chọn ví.');
+      _snack(l10n.captureConfirmPickWallet);
       return;
     }
 
@@ -110,7 +112,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      _snack('Có lỗi xảy ra: $e');
+      _snack(l10n.commonUnexpectedError(e.toString()));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -118,19 +120,19 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
 
   Future<void> _dismiss() async {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Bỏ qua thông báo này?'),
-        content:
-            const Text('Thông báo sẽ không tạo giao dịch nào.'),
+        title: Text(l10n.captureConfirmDismissConfirmTitle),
+        content: Text(l10n.captureConfirmDismissConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Bỏ qua')),
+              child: Text(l10n.captureConfirmDismissAction)),
         ],
       ),
     );
@@ -143,15 +145,16 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
     final sym = ref.watch(settingsProvider).currencySymbol;
+    final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
       appBar: AppBar(
         title:
-            Text(_isUnparsed ? 'Nhập thủ công' : 'Xác nhận giao dịch'),
+            Text(_isUnparsed ? l10n.captureConfirmManualTitle : l10n.captureConfirmTitle),
         actions: [
           TextButton(
             onPressed: _saving ? null : _dismiss,
-            child: const Text('Bỏ qua'),
+            child: Text(l10n.captureConfirmDismissAction),
           ),
         ],
       ),
@@ -166,7 +169,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
               final cats = catSnap.data;
               final catItems = cats != null && cats.isNotEmpty
                   ? cats
-                  : _fallbackCats(_txType);
+                  : _fallbackCats(_txType, l10n);
 
               return ListView(
                 padding: const EdgeInsets.all(16),
@@ -190,7 +193,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    'Thông báo chưa đọc được tự động',
+                                    l10n.captureConfirmUnparsedBanner,
                                     style: TextStyle(
                                       color: Theme.of(context)
                                           .colorScheme
@@ -230,13 +233,13 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                   ],
                   // Direction
                   SegmentedButton<CaptureDirection>(
-                    segments: const [
+                    segments: [
                       ButtonSegment(
                           value: CaptureDirection.expense,
-                          label: Text('Chi tiêu')),
+                          label: Text(l10n.txTypeSpending)),
                       ButtonSegment(
                           value: CaptureDirection.income,
-                          label: Text('Thu nhập')),
+                          label: Text(l10n.txTypeEarning)),
                     ],
                     selected: {_direction},
                     onSelectionChanged: (s) =>
@@ -251,7 +254,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                       FilteringTextInputFormatter.digitsOnly
                     ],
                     decoration: InputDecoration(
-                        labelText: 'Số tiền', suffixText: sym),
+                        labelText: l10n.fieldAmount, suffixText: sym),
                   ),
                   const SizedBox(height: 16),
                   // Wallet (required)
@@ -260,7 +263,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                         ? _walletId
                         : null,
                     decoration:
-                        const InputDecoration(labelText: 'Ví *'),
+                        InputDecoration(labelText: l10n.captureConfirmWalletField),
                     items: [
                       for (final w in wallets)
                         DropdownMenuItem(
@@ -275,10 +278,10 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                         ? _category
                         : null,
                     decoration:
-                        const InputDecoration(labelText: 'Danh mục'),
+                        InputDecoration(labelText: l10n.fieldCategory),
                     items: [
-                      const DropdownMenuItem<String?>(
-                          value: null, child: Text('— Bỏ qua —')),
+                      DropdownMenuItem<String?>(
+                          value: null, child: Text(l10n.captureConfirmCategoryNone)),
                       for (final c in catItems)
                         DropdownMenuItem<String?>(
                             value: c.id, child: Text(c.label)),
@@ -290,17 +293,17 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.schedule),
-                      title: const Text('Thời gian giao dịch'),
+                      title: Text(l10n.captureConfirmTimeLabel),
                       subtitle: Text(formatDateTime(_timestamp)),
                       trailing: TextButton(
                           onPressed: _pickDate,
-                          child: const Text('Sửa')),
+                          child: Text(l10n.commonEdit)),
                     ),
                   ),
                   const SizedBox(height: 4),
                   // Starred
                   SwitchListTile(
-                    title: const Text('Đánh dấu sao'),
+                    title: Text(l10n.commonMarkStarred),
                     value: _starred,
                     onChanged: (v) => setState(() => _starred = v),
                   ),
@@ -314,7 +317,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Nội dung thông báo',
+                              l10n.captureConfirmRawContentLabel,
                               style:
                                   Theme.of(context).textTheme.labelMedium,
                             ),
@@ -341,7 +344,7 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
                             child: CircularProgressIndicator(
                                 strokeWidth: 2))
                         : const Icon(Icons.check),
-                    label: const Text('Xác nhận giao dịch'),
+                    label: Text(l10n.captureConfirmTitle),
                   ),
                   const SizedBox(height: 80),
                 ],
@@ -354,13 +357,13 @@ class _CaptureConfirmPageState extends ConsumerState<CaptureConfirmPage> {
   }
 }
 
-List<AppCategory> _fallbackCats(String type) {
+List<AppCategory> _fallbackCats(String type, AppLocalizations l10n) {
   final ids = Categories.forType(type);
   return [
     for (var i = 0; i < ids.length; i++)
       AppCategory(
         id: ids[i],
-        label: Categories.label(ids[i]),
+        label: Categories.label(l10n, ids[i]),
         kind: type,
         threshold: 0,
         isDefault: true,

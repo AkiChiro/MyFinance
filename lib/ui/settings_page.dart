@@ -6,12 +6,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/database.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
-import '../services/csv_service.dart';
 import '../services/notification_service.dart';
 import 'categories_page.dart';
 import 'theme_customization_page.dart';
+import 'widgets/icon_slots.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -31,122 +32,71 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _export() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _busy = true);
     try {
-      final files = await ref.read(repositoryProvider).csv.export();
+      final settings = ref.read(settingsProvider);
+      final suggester = ref.read(suggesterProvider);
+      final file = await ref.read(repositoryProvider).csv.exportAll(
+            settingsEntries: settings.exportEntries(kIconSlots),
+            keywordRules: await suggester.loadRaw(),
+          );
       await SharePlus.instance
-          .share(ShareParams(files: files, subject: 'MyFinance — sao lưu CSV'));
+          .share(ShareParams(files: [file], subject: l10n.settingsCsvShareSubject));
     } catch (e) {
-      _snack('Xuất CSV thất bại: $e');
+      _snack(l10n.settingsExportFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _importMerge() async {
-    final mode = await showDialog<CsvImportMode>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Chọn chế độ nhập'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Chỉ lưu trữ'),
-              subtitle: const Text('Không ảnh hưởng đến số dư ví.'),
-              onTap: () => Navigator.pop(ctx, CsvImportMode.contextOnly),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Khôi phục số dư'),
-              subtitle: const Text('Tính vào số dư — chỉ dùng cho ví trống.'),
-              onTap: () => Navigator.pop(ctx, CsvImportMode.reconstructBalance),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Huỷ'),
-          ),
-        ],
-      ),
-    );
-    if (mode == null || !mounted) return;
-
-    final picked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final path = picked?.files.single.path;
-    if (path == null) return;
-
-    setState(() => _busy = true);
-    try {
-      final r = await ref
-          .read(repositoryProvider)
-          .csv
-          .importMerge(path, mode: mode);
-      _snack('Đã gộp ${r.added} giao dịch mới (bỏ qua ${r.skipped}).');
-    } on NonEmptyWalletReconstructError {
-      _snack(
-          'Ví đã có giao dịch ảnh hưởng số dư. Chọn "Chỉ lưu trữ" hoặc dùng ví trống.');
-    } catch (e) {
-      _snack('Nhập CSV thất bại: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _importReplace() async {
+  Future<void> _import() async {
+    final l10n = AppLocalizations.of(context)!;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Thay thế toàn bộ dữ liệu?'),
-        content: const Text(
-          'Thao tác này sẽ XOÁ toàn bộ ví và giao dịch hiện tại, '
-          'sau đó khôi phục từ hai file CSV (ví + giao dịch).\n\n'
-          'Không thể hoàn tác. Hãy chắc chắn bạn có bản sao lưu.',
-        ),
+        title: Text(l10n.settingsCsvImportConfirmTitle),
+        content: Text(l10n.settingsCsvImportConfirmBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Tiếp tục'),
+            child: Text(l10n.settingsCsvImportConfirmAction),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
 
-    _snack('Chọn file ví (myfinance_wallets_...)');
-    final wPicked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final wPath = wPicked?.files.single.path;
-    if (wPath == null || !mounted) return;
-
-    _snack('Chọn file giao dịch (myfinance_txns_...)');
-    final tPicked = await FilePicker.platform
-        .pickFiles(type: FileType.custom, allowedExtensions: ['csv']);
-    final tPath = tPicked?.files.single.path;
-    if (tPath == null || !mounted) return;
+    // FileType.custom + allowedExtensions asks Android's document picker to
+    // filter by MIME type. Cloud-provider-listed files (e.g. Google Drive)
+    // often don't report the exact MIME type expected, so they show up
+    // greyed out and unselectable even with the right extension. FileType.any
+    // skips that filter; the extension is checked here instead.
+    final picked = await FilePicker.platform.pickFiles(type: FileType.any);
+    final path = picked?.files.single.path;
+    if (path == null) return;
+    if (!path.toLowerCase().endsWith('.csv')) {
+      _snack(l10n.settingsCsvWrongFileType);
+      return;
+    }
 
     setState(() => _busy = true);
     try {
-      final r = await ref.read(repositoryProvider).csv.importReplace(wPath, tPath);
-      _snack('Đã khôi phục ${r.added} giao dịch.');
+      final r = await ref.read(repositoryProvider).csv.importAll(path);
+      _snack(l10n.csvImportResult(
+          r.walletsAdded, r.walletsSkipped, r.txnsAdded, r.txnsUpdated));
     } catch (e) {
-      _snack('Khôi phục thất bại: $e');
+      _snack(l10n.settingsImportFailed(e.toString()));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _handleNotifToggle(bool v) async {
+    final l10n = AppLocalizations.of(context)!;
     ref.read(settingsProvider).notifEnabled = v;
     if (v) {
       final status = await Permission.notification.status;
@@ -155,21 +105,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         await showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Cần quyền thông báo'),
-            content: const Text(
-              'Quyền thông báo đã bị từ chối vĩnh viễn. '
-              'Vui lòng cấp quyền trong Cài đặt ứng dụng.',
-            ),
+            title: Text(l10n.settingsNotifPermTitle),
+            content: Text(l10n.settingsNotifPermBody),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Không phải bây giờ')),
+                  child: Text(l10n.settingsNotNow)),
               FilledButton(
                   onPressed: () {
                     Navigator.pop(ctx);
                     openAppSettings();
                   },
-                  child: const Text('Mở cài đặt')),
+                  child: Text(l10n.settingsOpenSettings)),
             ],
           ),
         );
@@ -178,7 +125,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           await Permission.notification.request();
         }
         if (await Permission.notification.isGranted) {
-          await NotificationService.instance.showPersistentNotification();
+          await NotificationService.instance
+              .showPersistentNotification(locale: ref.read(settingsProvider).locale);
         }
       }
     } else {
@@ -191,25 +139,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _showSeenPackages() async {
+    final l10n = AppLocalizations.of(context)!;
     final packages =
         await ref.read(captureServiceProvider).seenPackages();
     if (!mounted) return;
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Gói ứng dụng đã thấy'),
+        title: Text(l10n.settingsSeenPackagesTitle),
         content: packages.isEmpty
-            ? const Text(
-                'Chưa có gói nào. Cấp quyền nghe thông báo và chờ '
-                'ứng dụng ngân hàng gửi thông báo.')
+            ? Text(l10n.settingsNoPackagesSeen)
             : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Dùng các tên gói này để xác minh BankPackages.',
-                      style: TextStyle(fontSize: 12),
+                    Text(
+                      l10n.settingsPackagesHint,
+                      style: const TextStyle(fontSize: 12),
                     ),
                     const SizedBox(height: 8),
                     for (final pkg in packages)
@@ -226,7 +173,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Đóng'),
+            child: Text(l10n.commonClose),
           ),
         ],
       ),
@@ -234,28 +181,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _editCurrencySymbol() async {
+    final l10n = AppLocalizations.of(context)!;
     final settings = ref.read(settingsProvider);
     final ctrl = TextEditingController(text: settings.currencySymbol);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Ký hiệu tiền tệ'),
+        title: Text(l10n.settingsCurrencySymbolTitle),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLength: 8,
-          decoration: const InputDecoration(
-            labelText: 'Ký hiệu',
+          decoration: InputDecoration(
+            labelText: l10n.settingsCurrencySymbolFieldLabel,
             hintText: '₫',
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Huỷ')),
+              child: Text(l10n.commonCancel)),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Lưu')),
+              child: Text(l10n.commonSave)),
         ],
       ),
     );
@@ -269,46 +217,65 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final l10n = AppLocalizations.of(context)!;
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         // ── Notifications ──────────────────────────────────────────────────
-        const _SectionHeader('Thông báo'),
+        _SectionHeader(l10n.settingsSectionNotifications),
         Card(
           child: Column(
             children: [
               SwitchListTile(
                 secondary: const Icon(Icons.notifications_outlined),
-                title: const Text('Thông báo liên tục'),
-                subtitle:
-                    const Text('Giữ nút thêm nhanh trong thanh thông báo.'),
+                title: Text(l10n.settingsNotifTitle),
+                subtitle: Text(l10n.settingsNotifSubtitle),
                 value: settings.notifEnabled,
                 onChanged: _handleNotifToggle,
               ),
               const Divider(height: 1),
-              const ListTile(
-                leading: Icon(Icons.battery_saver_outlined),
-                title: Text('Lưu ý pin'),
-                subtitle: Text(
-                  'Nếu thông báo biến mất sau khi tắt màn hình, '
-                  'hãy tắt "Tối ưu hoá pin" cho MyFinance trong '
-                  'Cài đặt → Ứng dụng.',
-                ),
+              ListTile(
+                leading: const Icon(Icons.battery_saver_outlined),
+                title: Text(l10n.settingsBatteryTitle),
+                subtitle: Text(l10n.settingsBatteryBody),
               ),
             ],
           ),
         ),
         const SizedBox(height: 16),
 
+        // ── Language ───────────────────────────────────────────────────────
+        _SectionHeader(l10n.settingsSectionLanguage),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'vi', label: Text('Tiếng Việt')),
+                ButtonSegment(value: 'en', label: Text('English')),
+              ],
+              selected: {settings.locale},
+              onSelectionChanged: (s) async {
+                settings.locale = s.first;
+                if (settings.notifEnabled) {
+                  await NotificationService.instance
+                      .showPersistentNotification(locale: s.first);
+                }
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
         // ── Currency ───────────────────────────────────────────────────────
-        const _SectionHeader('Đơn vị tiền tệ'),
+        _SectionHeader(l10n.settingsSectionCurrency),
         Card(
           child: Column(
             children: [
               ListTile(
                 leading: const Icon(Icons.currency_exchange),
-                title: const Text('Ký hiệu tiền tệ'),
-                subtitle: Text('Ví dụ: 100.000 ${settings.currencySymbol}'),
+                title: Text(l10n.settingsCurrencySymbolTitle),
+                subtitle: Text(l10n.currencyExampleLabel(settings.currencySymbol)),
                 trailing: const Icon(Icons.edit_outlined),
                 onTap: _editCurrencySymbol,
               ),
@@ -318,13 +285,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── Auto-star ──────────────────────────────────────────────────────
-        const _SectionHeader('Tự động đánh dấu sao'),
+        _SectionHeader(l10n.settingsSectionAutostar),
         Card(
           child: SwitchListTile(
             secondary: const Icon(Icons.star_outline),
-            title: const Text('Tự động sao theo ngưỡng'),
-            subtitle: const Text(
-                'Tự động đánh dấu sao cho khoản chi vượt ngưỡng danh mục.'),
+            title: Text(l10n.settingsAutostarTitle),
+            subtitle: Text(l10n.settingsAutostarSubtitle),
             value: settings.autostarEnabled,
             onChanged: (v) => settings.autostarEnabled = v,
           ),
@@ -332,13 +298,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── Categories ─────────────────────────────────────────────────────
-        const _SectionHeader('Danh mục'),
+        _SectionHeader(l10n.settingsSectionCategories),
         Card(
           child: ListTile(
             leading: const Icon(Icons.category_outlined),
-            title: const Text('Quản lý danh mục'),
-            subtitle: const Text(
-                'Thêm, sửa, lưu trữ danh mục chi tiêu và thu nhập.'),
+            title: Text(l10n.settingsManageCategoriesTitle),
+            subtitle: Text(l10n.settingsManageCategoriesSubtitle),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CategoriesPage()),
@@ -348,7 +313,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── Theme ──────────────────────────────────────────────────────────
-        const _SectionHeader('Giao diện'),
+        _SectionHeader(l10n.settingsSectionTheme),
         Card(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -358,15 +323,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Chế độ màu',
+                    Text(l10n.settingsColorModeLabel,
                         style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 8),
                     SegmentedButton<String>(
-                      segments: const [
+                      segments: [
                         ButtonSegment(
-                            value: 'system', label: Text('Hệ thống')),
-                        ButtonSegment(value: 'light', label: Text('Sáng')),
-                        ButtonSegment(value: 'dark', label: Text('Tối')),
+                            value: 'system', label: Text(l10n.settingsThemeSystem)),
+                        ButtonSegment(value: 'light', label: Text(l10n.settingsThemeLight)),
+                        ButtonSegment(value: 'dark', label: Text(l10n.settingsThemeDark)),
                       ],
                       selected: {settings.themeMode},
                       onSelectionChanged: (s) =>
@@ -378,9 +343,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.tune_outlined),
-                title: const Text('Tuỳ chỉnh nâng cao'),
-                subtitle: const Text(
-                    'Màu nền, màu chữ, ảnh nền, màu chủ đề.'),
+                title: Text(l10n.settingsAdvancedThemeTitle),
+                subtitle: Text(l10n.settingsAdvancedThemeSubtitle),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const ThemeCustomizationPage(),
@@ -392,37 +356,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── CSV Backup ─────────────────────────────────────────────────────
-        const _SectionHeader('Sao lưu dữ liệu (CSV)'),
+        _SectionHeader(l10n.settingsSectionCsv),
         Card(
           child: Column(
             children: [
               ListTile(
                 leading: const Icon(Icons.upload_file),
-                title: const Text('Xuất CSV'),
-                subtitle: const Text(
-                    'Chia sẻ/lưu giao dịch và ví ra file CSV.'),
+                title: Text(l10n.settingsCsvExportTitle),
+                subtitle: Text(l10n.settingsCsvExportSubtitle),
                 onTap: _busy ? null : _export,
               ),
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.download),
-                title: const Text('Nhập CSV (gộp)'),
-                subtitle: const Text(
-                    'Gộp theo id. Giao dịch nhập chỉ để xem lịch sử — '
-                    'không tính vào số dư hay thống kê.'),
-                onTap: _busy ? null : _importMerge,
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.restore,
-                    color: Theme.of(context).colorScheme.error),
-                title: Text('Nhập CSV (thay thế toàn bộ)',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.error)),
-                subtitle: const Text(
-                    'Xoá toàn bộ dữ liệu hiện tại và khôi phục từ CSV. '
-                    'Cần chọn hai file: ví rồi giao dịch.'),
-                onTap: _busy ? null : _importReplace,
+                title: Text(l10n.settingsCsvImportTitle),
+                subtitle: Text(l10n.settingsCsvImportSubtitle),
+                onTap: _busy ? null : _import,
               ),
             ],
           ),
@@ -430,13 +379,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── Keyword Library ────────────────────────────────────────────────
-        const _SectionHeader('Danh mục gợi ý'),
+        _SectionHeader(l10n.settingsSectionKeywords),
         Card(
           child: ListTile(
             leading: const Icon(Icons.label_outline),
-            title: const Text('Thư viện từ khoá'),
-            subtitle: const Text(
-                'Sửa từ khoá và danh mục gợi ý khi nhập mô tả.'),
+            title: Text(l10n.settingsKeywordLibraryTitle),
+            subtitle: Text(l10n.settingsKeywordLibrarySubtitle),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const KeywordEditorPage()),
@@ -446,40 +394,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const SizedBox(height: 16),
 
         // ── About ──────────────────────────────────────────────────────────
-        const _SectionHeader('Thông tin'),
-        const Card(
+        _SectionHeader(l10n.settingsSectionAbout),
+        Card(
           child: ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('MyFinance'),
-            subtitle: Text(
-                'Phiên bản 0.2 · Hoàn toàn ngoại tuyến · Chỉ dùng VND.'),
+            leading: const Icon(Icons.info_outline),
+            title: const Text('MyFinance'),
+            subtitle: Text(l10n.settingsAboutSubtitle),
           ),
         ),
         const SizedBox(height: 16),
 
         // ── Developer ─────────────────────────────────────────────────────
-        const _SectionHeader('Nhà phát triển'),
+        _SectionHeader(l10n.settingsSectionDeveloper),
         Card(
           child: Column(
             children: [
               ListTile(
                 leading: const Icon(Icons.notifications_active_outlined),
-                title: const Text('Cấp quyền nghe thông báo'),
-                subtitle: const Text(
-                  'Mở cài đặt hệ thống để bật quyền cho dịch vụ '
-                  'chụp thông báo ngân hàng (BankCaptureService).',
-                ),
+                title: Text(l10n.settingsListenerPermTitle),
+                subtitle: Text(l10n.settingsListenerPermSubtitle),
                 trailing: const Icon(Icons.open_in_new_outlined),
                 onTap: _openListenerSettings,
               ),
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.explore_outlined),
-                title: const Text('Gói ứng dụng đã thấy'),
-                subtitle: const Text(
-                  'Xem tên gói của các ứng dụng đã gửi thông báo — '
-                  'dùng để xác minh hằng số BankPackages.',
-                ),
+                title: Text(l10n.settingsSeenPackagesTitle),
+                subtitle: Text(l10n.settingsSeenPackagesSubtitle),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: _showSeenPackages,
               ),
@@ -559,7 +500,7 @@ class _KeywordEditorPageState extends ConsumerState<KeywordEditorPage> {
     setState(() => _dirty = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã lưu thư viện từ khoá.')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.keywordEditorSaved)),
       );
     }
   }
@@ -587,18 +528,19 @@ class _KeywordEditorPageState extends ConsumerState<KeywordEditorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Từ khoá gợi ý'),
+        title: Text(l10n.keywordEditorTitle),
         actions: [
           if (_dirty)
-            TextButton(onPressed: _save, child: const Text('Lưu')),
+            TextButton(onPressed: _save, child: Text(l10n.commonSave)),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _rules.isEmpty
-              ? const Center(child: Text('Chưa có từ khoá nào.'))
+              ? Center(child: Text(l10n.keywordEditorEmpty))
               : ListView.builder(
                   itemCount: _rules.length,
                   itemBuilder: (context, i) {
@@ -615,7 +557,7 @@ class _KeywordEditorPageState extends ConsumerState<KeywordEditorPage> {
                       subtitle: Text(
                         catId == null
                             ? '—'
-                            : (_catLabels[catId] ?? Categories.label(catId)),
+                            : (_catLabels[catId] ?? Categories.label(l10n, catId)),
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
@@ -662,20 +604,21 @@ class _AddKeywordDialogState extends State<_AddKeywordDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return AlertDialog(
-      title: const Text('Thêm từ khoá'),
+      title: Text(l10n.keywordEditorAddTitle),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
             controller: _kwCtrl,
-            decoration: const InputDecoration(labelText: 'Từ khoá'),
+            decoration: InputDecoration(labelText: l10n.keywordEditorKeywordField),
             autofocus: true,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _category,
-            decoration: const InputDecoration(labelText: 'Danh mục'),
+            decoration: InputDecoration(labelText: l10n.fieldCategory),
             items: [
               for (final c in widget.categories)
                 DropdownMenuItem(value: c.id, child: Text(c.label)),
@@ -687,14 +630,14 @@ class _AddKeywordDialogState extends State<_AddKeywordDialog> {
             controller: _wCtrl,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(labelText: 'Trọng số (1–10)'),
+            decoration: InputDecoration(labelText: l10n.keywordEditorWeightField),
           ),
         ],
       ),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Huỷ')),
+            child: Text(l10n.commonCancel)),
         FilledButton(
           onPressed: () {
             final kw = _kwCtrl.text.trim();
@@ -706,7 +649,7 @@ class _AddKeywordDialogState extends State<_AddKeywordDialog> {
               'weight': w.clamp(1, 20),
             });
           },
-          child: const Text('Thêm'),
+          child: Text(l10n.commonAdd),
         ),
       ],
     );

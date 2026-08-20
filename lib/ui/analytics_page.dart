@@ -4,26 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
-
-// ---------------------------------------------------------------------------
-// Category colours
-// ---------------------------------------------------------------------------
-const _spendColors = <String, Color>{
-  'necessities': Color(0xFFFF7043),
-  'food': Color(0xFFFFCA28),
-  'hobbies': Color(0xFF7E57C2),
-  'others': Color(0xFF78909C),
-};
-const _earnColors = <String, Color>{
-  'provided': Color(0xFF66BB6A),
-  'self_earned': Color(0xFF42A5F5),
-  'others_earn': Color(0xFF78909C),
-};
-
-Color _spendColor(String cat) => _spendColors[cat] ?? const Color(0xFF78909C);
-Color _earnColor(String cat) => _earnColors[cat] ?? const Color(0xFF78909C);
+import 'category_colors.dart';
+import 'widgets/app_icon.dart';
 
 // ---------------------------------------------------------------------------
 // Analytics data holder
@@ -105,6 +90,18 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
     }
   }
 
+  /// Switches to Giao dịch pre-filtered to match what was tapped here —
+  /// same type, same category (if any), and scoped to the month currently
+  /// shown so the landed list sums to the figure that was tapped.
+  void _drillDown({required String type, String? category}) {
+    ref.read(txnTypeFilterProvider.notifier).state = type;
+    ref.read(txnCategoryFilterProvider.notifier).state = category;
+    ref.read(txnStarredOnlyProvider.notifier).state = false;
+    ref.read(monthModeProvider.notifier).state = true;
+    ref.read(selectedMonthProvider.notifier).state = _month;
+    ref.read(homeTabIndexProvider.notifier).state = 1; // Giao dịch tab
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.read(repositoryProvider);
@@ -122,33 +119,47 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
               return const Center(child: CircularProgressIndicator());
             }
             final s = _Stats.fromBundle(bundle);
+            final l10n = AppLocalizations.of(context)!;
 
             return ListView(
               padding: const EdgeInsets.all(12),
               children: [
                 _MonthPicker(month: _month, onPrev: _prevMonth, onNext: _nextMonth),
                 const SizedBox(height: 12),
-                _SummaryCards(stats: s),
+                _SummaryCards(
+                  stats: s,
+                  onTotalTap: (type) => _drillDown(type: type),
+                ),
                 const SizedBox(height: 16),
                 _BarSection(stats: s, month: _month),
                 const SizedBox(height: 16),
                 if (s.spendByCat.isNotEmpty) ...[
                   _PieSection(
-                    title: 'Chi tiêu theo danh mục',
+                    title: l10n.analyticsSpendByCategoryTitle,
                     data: s.spendByCat,
                     total: s.spending,
-                    colorOf: _spendColor,
+                    colorOf: spendColor,
                     catLabels: catLabels,
+                    onSliceTap: (category) =>
+                        _drillDown(type: TxTypes.spending, category: category),
                   ),
                   const SizedBox(height: 16),
                 ],
+                _EnvelopeSection(
+                  catLabels: catLabels,
+                  onRowTap: (category) =>
+                      _drillDown(type: TxTypes.spending, category: category),
+                ),
+                const SizedBox(height: 16),
                 if (s.earnByCat.isNotEmpty) ...[
                   _PieSection(
-                    title: 'Thu nhập theo danh mục',
+                    title: l10n.analyticsEarnByCategoryTitle,
                     data: s.earnByCat,
                     total: s.earning,
-                    colorOf: _earnColor,
+                    colorOf: earnColor,
                     catLabels: catLabels,
+                    onSliceTap: (category) =>
+                        _drillDown(type: TxTypes.earning, category: category),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -202,11 +213,13 @@ class _MonthPicker extends StatelessWidget {
 // Summary cards
 // ---------------------------------------------------------------------------
 class _SummaryCards extends StatelessWidget {
-  const _SummaryCards({required this.stats});
+  const _SummaryCards({required this.stats, required this.onTotalTap});
   final _Stats stats;
+  final void Function(String type) onTotalTap;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final net = stats.net;
     final netColor =
         net >= 0 ? Colors.green.shade700 : Theme.of(context).colorScheme.error;
@@ -215,19 +228,27 @@ class _SummaryCards extends StatelessWidget {
         Row(
           children: [
             _StatCard(
-              label: 'Tổng chi',
+              label: l10n.analyticsTotalSpending,
               value: formatVnd(stats.spending),
               color: Theme.of(context).colorScheme.error,
-              icon: Icons.south_west,
+              icon: AppIcon('type_spending',
+                  fallback: Icons.south_west,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.error),
               pct: _pct(stats.spending, stats.prevSpending),
+              onTap: () => onTotalTap(TxTypes.spending),
             ),
             const SizedBox(width: 8),
             _StatCard(
-              label: 'Tổng thu',
+              label: l10n.analyticsTotalEarning,
               value: formatVnd(stats.earning),
               color: Colors.green.shade700,
-              icon: Icons.north_east,
+              icon: AppIcon('type_earning',
+                  fallback: Icons.north_east,
+                  size: 16,
+                  color: Colors.green.shade700),
               pct: _pct(stats.earning, stats.prevEarning),
+              onTap: () => onTotalTap(TxTypes.earning),
             ),
           ],
         ),
@@ -238,7 +259,7 @@ class _SummaryCards extends StatelessWidget {
               net >= 0 ? Icons.trending_up : Icons.trending_down,
               color: netColor,
             ),
-            title: const Text('Chênh lệch tháng này'),
+            title: Text(l10n.analyticsNetThisMonth),
             trailing: Text(
               (net >= 0 ? '+' : '') + formatVnd(net),
               style:
@@ -246,7 +267,8 @@ class _SummaryCards extends StatelessWidget {
             ),
             subtitle: stats.prevNet != 0
                 ? Text(
-                    'So tháng trước: ${_pctStr(_pct(net, stats.prevNet))}',
+                    l10n.analyticsNetComparisonLabel(
+                        _signedPctStr(_pct(net, stats.prevNet)!)),
                     style: TextStyle(
                         color: (net >= stats.prevNet
                             ? Colors.green.shade700
@@ -272,43 +294,50 @@ class _StatCard extends StatelessWidget {
     required this.color,
     required this.icon,
     required this.pct,
+    this.onTap,
   });
   final String label;
   final String value;
   final Color color;
-  final IconData icon;
+  final Widget icon;
   final double? pct;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Expanded(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, size: 16, color: color),
-                  const SizedBox(width: 4),
-                  Text(label,
-                      style: Theme.of(context).textTheme.labelSmall),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(value,
-                  style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14)),
-              if (pct != null)
-                Text(_pctStr(pct),
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
-                        ?.copyWith(color: Colors.grey)),
-            ],
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16), // matches main.dart's global CardThemeData shape
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: 4),
+                    Text(label,
+                        style: Theme.of(context).textTheme.labelSmall),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(value,
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14)),
+                if (pct != null)
+                  Text(l10n.analyticsPctSuffix(_signedPctStr(pct!)),
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelSmall
+                          ?.copyWith(color: Colors.grey)),
+              ],
+            ),
           ),
         ),
       ),
@@ -316,11 +345,8 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-String _pctStr(double? pct) {
-  if (pct == null) return '';
-  final sign = pct >= 0 ? '+' : '';
-  return '$sign${pct.toStringAsFixed(1)}% so tháng trước';
-}
+String _signedPctStr(double pct) =>
+    '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(1)}%';
 
 // ---------------------------------------------------------------------------
 // Bar chart — this month vs previous month
@@ -332,6 +358,7 @@ class _BarSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final prev = DateTime(month.year, month.month - 1);
     final maxY = [
           stats.spending.toDouble(),
@@ -342,10 +369,10 @@ class _BarSection extends StatelessWidget {
         1.15;
 
     if (maxY == 0) {
-      return const Card(
+      return Card(
           child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: Text('Chưa có dữ liệu.'))));
+              padding: const EdgeInsets.all(16),
+              child: Center(child: Text(l10n.analyticsNoData))));
     }
 
     final errorColor = Theme.of(context).colorScheme.error;
@@ -358,7 +385,7 @@ class _BarSection extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.only(left: 8, bottom: 8),
-              child: Text('So sánh tháng',
+              child: Text(l10n.analyticsMonthComparisonTitle,
                   style: Theme.of(context)
                       .textTheme
                       .titleSmall
@@ -367,17 +394,18 @@ class _BarSection extends StatelessWidget {
             Row(
               children: [
                 _LegendDot(color: errorColor.withValues(alpha: 0.5),
-                    label: 'Chi (${formatMonth(prev)})'),
+                    label: l10n.spendingLegendLabel(formatMonth(prev))),
                 const SizedBox(width: 12),
-                _LegendDot(color: errorColor, label: 'Chi (${formatMonth(month)})'),
+                _LegendDot(color: errorColor,
+                    label: l10n.spendingLegendLabel(formatMonth(month))),
                 const SizedBox(width: 12),
                 _LegendDot(
                     color: Colors.green.shade300,
-                    label: 'Thu (${formatMonth(prev)})'),
+                    label: l10n.earningLegendLabel(formatMonth(prev))),
                 const SizedBox(width: 12),
                 _LegendDot(
                     color: Colors.green.shade700,
-                    label: 'Thu (${formatMonth(month)})'),
+                    label: l10n.earningLegendLabel(formatMonth(month))),
               ],
             ),
             const SizedBox(height: 12),
@@ -425,7 +453,7 @@ class _BarSection extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (v, _) => Text(
-                          v == 0 ? 'Chi tiêu' : 'Thu nhập',
+                          v == 0 ? l10n.txTypeSpending : l10n.txTypeEarning,
                           style: const TextStyle(fontSize: 11),
                         ),
                       ),
@@ -492,12 +520,14 @@ class _PieSection extends StatefulWidget {
     required this.total,
     required this.colorOf,
     required this.catLabels,
+    this.onSliceTap,
   });
   final String title;
   final Map<String, int> data;
   final int total;
   final Color Function(String) colorOf;
   final Map<String, String> catLabels;
+  final void Function(String categoryId)? onSliceTap;
 
   @override
   State<_PieSection> createState() => _PieSectionState();
@@ -508,6 +538,7 @@ class _PieSectionState extends State<_PieSection> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final entries = widget.data.entries.toList();
     return Card(
       child: Padding(
@@ -530,6 +561,13 @@ class _PieSectionState extends State<_PieSection> {
                     PieChartData(
                       pieTouchData: PieTouchData(
                         touchCallback: (event, response) {
+                          if (event is FlTapUpEvent) {
+                            final idx =
+                                response?.touchedSection?.touchedSectionIndex;
+                            if (idx != null && idx >= 0 && idx < entries.length) {
+                              widget.onSliceTap?.call(entries[idx].key);
+                            }
+                          }
                           setState(() {
                             if (!event.isInterestedForInteractions ||
                                 response == null ||
@@ -570,36 +608,38 @@ class _PieSectionState extends State<_PieSection> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: entries.map((e) {
-                      final pct = widget.total > 0
-                          ? e.value / widget.total * 100
-                          : 0.0;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                  color: widget.colorOf(e.key),
-                                  shape: BoxShape.circle),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                widget.catLabels[e.key] ??
-                                    Categories.label(e.key),
-                                style: const TextStyle(fontSize: 12),
-                                overflow: TextOverflow.ellipsis,
+                      return InkWell(
+                        onTap: widget.onSliceTap == null
+                            ? null
+                            : () => widget.onSliceTap!(e.key),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                    color: widget.colorOf(e.key),
+                                    shape: BoxShape.circle),
                               ),
-                            ),
-                            Text(
-                              '${pct.toStringAsFixed(1)}%',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  widget.catLabels[e.key] ??
+                                      Categories.label(l10n, e.key),
+                                  style: const TextStyle(fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                formatVnd(e.value),
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
@@ -608,11 +648,90 @@ class _PieSectionState extends State<_PieSection> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('Tổng: ${formatVnd(widget.total)}',
+            Text(l10n.analyticsCategoryTotal(formatVnd(widget.total)),
                 style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Envelope budgeting — per-category remaining "stack"
+// ---------------------------------------------------------------------------
+//
+// Unlike the rest of this page's data (_Stats/AnalyticsBundle, all month-
+// scoped), envelope balances are cumulative since forever — a category's
+// stack carries over month to month until spent — so this section keeps its
+// own subscription rather than being folded into _Stats. Minimal display
+// only (a plain list, no progress bars) — see docs/architecture.md for the
+// reasoning; visual treatment is expected to be refined separately.
+class _EnvelopeSection extends ConsumerWidget {
+  const _EnvelopeSection({required this.catLabels, required this.onRowTap});
+  final Map<String, String> catLabels;
+  final void Function(String categoryId) onRowTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
+    return StreamBuilder<Map<String, int>>(
+      stream: repo.watchEnvelopeBalances(),
+      builder: (context, snap) {
+        final balances = snap.data ?? const <String, int>{};
+        if (balances.isEmpty) return const SizedBox.shrink();
+        final errorColor = Theme.of(context).colorScheme.error;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l10n.analyticsEnvelopeSectionTitle,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                for (final entry in balances.entries)
+                  InkWell(
+                    onTap: () => onRowTap(entry.key),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                                color: spendColor(entry.key),
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              catLabels[entry.key] ??
+                                  Categories.label(l10n, entry.key),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          Text(
+                            formatVnd(entry.value),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: entry.value < 0 ? errorColor : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -627,6 +746,7 @@ class _YearCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final net = stats.yearNet;
     final netColor =
         net >= 0 ? Colors.green.shade700 : Theme.of(context).colorScheme.error;
@@ -636,23 +756,23 @@ class _YearCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Năm $year',
+            Text(l10n.yearCardTitle(year),
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             _YearRow(
-                label: 'Tổng chi',
+                label: l10n.analyticsTotalSpending,
                 value: formatVnd(stats.yearSpending),
                 color: Theme.of(context).colorScheme.error),
             _YearRow(
-                label: 'Tổng thu',
+                label: l10n.analyticsTotalEarning,
                 value: formatVnd(stats.yearEarning),
                 color: Colors.green.shade700),
             const Divider(),
             _YearRow(
-              label: 'Chênh lệch',
+              label: l10n.analyticsNetLabel,
               value: (net >= 0 ? '+' : '') + formatVnd(net),
               color: netColor,
               bold: true,

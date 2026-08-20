@@ -39,9 +39,23 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
   late final GeneratedColumn<String> packageName = GeneratedColumn<String>(
       'package_name', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _sortOrderMeta =
+      const VerificationMeta('sortOrder');
+  @override
+  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
+      'sort_order', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _balanceCutoffAtMeta =
+      const VerificationMeta('balanceCutoffAt');
+  @override
+  late final GeneratedColumn<int> balanceCutoffAt = GeneratedColumn<int>(
+      'balance_cutoff_at', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns =>
-      [id, name, initialBalance, type, packageName];
+      [id, name, initialBalance, type, packageName, sortOrder, balanceCutoffAt];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -79,6 +93,16 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
           packageName.isAcceptableOrUnknown(
               data['package_name']!, _packageNameMeta));
     }
+    if (data.containsKey('sort_order')) {
+      context.handle(_sortOrderMeta,
+          sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
+    }
+    if (data.containsKey('balance_cutoff_at')) {
+      context.handle(
+          _balanceCutoffAtMeta,
+          balanceCutoffAt.isAcceptableOrUnknown(
+              data['balance_cutoff_at']!, _balanceCutoffAtMeta));
+    }
     return context;
   }
 
@@ -98,6 +122,10 @@ class $WalletsTable extends Wallets with TableInfo<$WalletsTable, Wallet> {
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
       packageName: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}package_name']),
+      sortOrder: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
+      balanceCutoffAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}balance_cutoff_at']),
     );
   }
 
@@ -113,12 +141,16 @@ class Wallet extends DataClass implements Insertable<Wallet> {
   final int initialBalance;
   final String type;
   final String? packageName;
+  final int sortOrder;
+  final int? balanceCutoffAt;
   const Wallet(
       {required this.id,
       required this.name,
       required this.initialBalance,
       required this.type,
-      this.packageName});
+      this.packageName,
+      required this.sortOrder,
+      this.balanceCutoffAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -128,6 +160,10 @@ class Wallet extends DataClass implements Insertable<Wallet> {
     map['type'] = Variable<String>(type);
     if (!nullToAbsent || packageName != null) {
       map['package_name'] = Variable<String>(packageName);
+    }
+    map['sort_order'] = Variable<int>(sortOrder);
+    if (!nullToAbsent || balanceCutoffAt != null) {
+      map['balance_cutoff_at'] = Variable<int>(balanceCutoffAt);
     }
     return map;
   }
@@ -141,6 +177,10 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       packageName: packageName == null && nullToAbsent
           ? const Value.absent()
           : Value(packageName),
+      sortOrder: Value(sortOrder),
+      balanceCutoffAt: balanceCutoffAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(balanceCutoffAt),
     );
   }
 
@@ -153,6 +193,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       initialBalance: serializer.fromJson<int>(json['initialBalance']),
       type: serializer.fromJson<String>(json['type']),
       packageName: serializer.fromJson<String?>(json['packageName']),
+      sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      balanceCutoffAt: serializer.fromJson<int?>(json['balanceCutoffAt']),
     );
   }
   @override
@@ -164,6 +206,8 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       'initialBalance': serializer.toJson<int>(initialBalance),
       'type': serializer.toJson<String>(type),
       'packageName': serializer.toJson<String?>(packageName),
+      'sortOrder': serializer.toJson<int>(sortOrder),
+      'balanceCutoffAt': serializer.toJson<int?>(balanceCutoffAt),
     };
   }
 
@@ -172,13 +216,19 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           String? name,
           int? initialBalance,
           String? type,
-          Value<String?> packageName = const Value.absent()}) =>
+          Value<String?> packageName = const Value.absent(),
+          int? sortOrder,
+          Value<int?> balanceCutoffAt = const Value.absent()}) =>
       Wallet(
         id: id ?? this.id,
         name: name ?? this.name,
         initialBalance: initialBalance ?? this.initialBalance,
         type: type ?? this.type,
         packageName: packageName.present ? packageName.value : this.packageName,
+        sortOrder: sortOrder ?? this.sortOrder,
+        balanceCutoffAt: balanceCutoffAt.present
+            ? balanceCutoffAt.value
+            : this.balanceCutoffAt,
       );
   Wallet copyWithCompanion(WalletsCompanion data) {
     return Wallet(
@@ -190,6 +240,10 @@ class Wallet extends DataClass implements Insertable<Wallet> {
       type: data.type.present ? data.type.value : this.type,
       packageName:
           data.packageName.present ? data.packageName.value : this.packageName,
+      sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      balanceCutoffAt: data.balanceCutoffAt.present
+          ? data.balanceCutoffAt.value
+          : this.balanceCutoffAt,
     );
   }
 
@@ -200,13 +254,16 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           ..write('name: $name, ')
           ..write('initialBalance: $initialBalance, ')
           ..write('type: $type, ')
-          ..write('packageName: $packageName')
+          ..write('packageName: $packageName, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('balanceCutoffAt: $balanceCutoffAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, initialBalance, type, packageName);
+  int get hashCode => Object.hash(
+      id, name, initialBalance, type, packageName, sortOrder, balanceCutoffAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -215,7 +272,9 @@ class Wallet extends DataClass implements Insertable<Wallet> {
           other.name == this.name &&
           other.initialBalance == this.initialBalance &&
           other.type == this.type &&
-          other.packageName == this.packageName);
+          other.packageName == this.packageName &&
+          other.sortOrder == this.sortOrder &&
+          other.balanceCutoffAt == this.balanceCutoffAt);
 }
 
 class WalletsCompanion extends UpdateCompanion<Wallet> {
@@ -224,6 +283,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
   final Value<int> initialBalance;
   final Value<String> type;
   final Value<String?> packageName;
+  final Value<int> sortOrder;
+  final Value<int?> balanceCutoffAt;
   final Value<int> rowid;
   const WalletsCompanion({
     this.id = const Value.absent(),
@@ -231,6 +292,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     this.initialBalance = const Value.absent(),
     this.type = const Value.absent(),
     this.packageName = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.balanceCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WalletsCompanion.insert({
@@ -239,6 +302,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     this.initialBalance = const Value.absent(),
     this.type = const Value.absent(),
     this.packageName = const Value.absent(),
+    this.sortOrder = const Value.absent(),
+    this.balanceCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         name = Value(name);
@@ -248,6 +313,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     Expression<int>? initialBalance,
     Expression<String>? type,
     Expression<String>? packageName,
+    Expression<int>? sortOrder,
+    Expression<int>? balanceCutoffAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -256,6 +323,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       if (initialBalance != null) 'initial_balance': initialBalance,
       if (type != null) 'type': type,
       if (packageName != null) 'package_name': packageName,
+      if (sortOrder != null) 'sort_order': sortOrder,
+      if (balanceCutoffAt != null) 'balance_cutoff_at': balanceCutoffAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -266,6 +335,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       Value<int>? initialBalance,
       Value<String>? type,
       Value<String?>? packageName,
+      Value<int>? sortOrder,
+      Value<int?>? balanceCutoffAt,
       Value<int>? rowid}) {
     return WalletsCompanion(
       id: id ?? this.id,
@@ -273,6 +344,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
       initialBalance: initialBalance ?? this.initialBalance,
       type: type ?? this.type,
       packageName: packageName ?? this.packageName,
+      sortOrder: sortOrder ?? this.sortOrder,
+      balanceCutoffAt: balanceCutoffAt ?? this.balanceCutoffAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -295,6 +368,12 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
     if (packageName.present) {
       map['package_name'] = Variable<String>(packageName.value);
     }
+    if (sortOrder.present) {
+      map['sort_order'] = Variable<int>(sortOrder.value);
+    }
+    if (balanceCutoffAt.present) {
+      map['balance_cutoff_at'] = Variable<int>(balanceCutoffAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -309,6 +388,8 @@ class WalletsCompanion extends UpdateCompanion<Wallet> {
           ..write('initialBalance: $initialBalance, ')
           ..write('type: $type, ')
           ..write('packageName: $packageName, ')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('balanceCutoffAt: $balanceCutoffAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2119,6 +2200,285 @@ class NotificationCapturesCompanion
   }
 }
 
+class $CategoryBudgetHistoryTable extends CategoryBudgetHistory
+    with TableInfo<$CategoryBudgetHistoryTable, CategoryBudgetEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CategoryBudgetHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _categoryIdMeta =
+      const VerificationMeta('categoryId');
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+      'category_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _percentMeta =
+      const VerificationMeta('percent');
+  @override
+  late final GeneratedColumn<int> percent = GeneratedColumn<int>(
+      'percent', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _effectiveFromMeta =
+      const VerificationMeta('effectiveFrom');
+  @override
+  late final GeneratedColumn<int> effectiveFrom = GeneratedColumn<int>(
+      'effective_from', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, categoryId, percent, effectiveFrom];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'category_budget_history';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<CategoryBudgetEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+          _categoryIdMeta,
+          categoryId.isAcceptableOrUnknown(
+              data['category_id']!, _categoryIdMeta));
+    } else if (isInserting) {
+      context.missing(_categoryIdMeta);
+    }
+    if (data.containsKey('percent')) {
+      context.handle(_percentMeta,
+          percent.isAcceptableOrUnknown(data['percent']!, _percentMeta));
+    } else if (isInserting) {
+      context.missing(_percentMeta);
+    }
+    if (data.containsKey('effective_from')) {
+      context.handle(
+          _effectiveFromMeta,
+          effectiveFrom.isAcceptableOrUnknown(
+              data['effective_from']!, _effectiveFromMeta));
+    } else if (isInserting) {
+      context.missing(_effectiveFromMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CategoryBudgetEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CategoryBudgetEntry(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      categoryId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category_id'])!,
+      percent: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}percent'])!,
+      effectiveFrom: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}effective_from'])!,
+    );
+  }
+
+  @override
+  $CategoryBudgetHistoryTable createAlias(String alias) {
+    return $CategoryBudgetHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class CategoryBudgetEntry extends DataClass
+    implements Insertable<CategoryBudgetEntry> {
+  final String id;
+  final String categoryId;
+  final int percent;
+  final int effectiveFrom;
+  const CategoryBudgetEntry(
+      {required this.id,
+      required this.categoryId,
+      required this.percent,
+      required this.effectiveFrom});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['category_id'] = Variable<String>(categoryId);
+    map['percent'] = Variable<int>(percent);
+    map['effective_from'] = Variable<int>(effectiveFrom);
+    return map;
+  }
+
+  CategoryBudgetHistoryCompanion toCompanion(bool nullToAbsent) {
+    return CategoryBudgetHistoryCompanion(
+      id: Value(id),
+      categoryId: Value(categoryId),
+      percent: Value(percent),
+      effectiveFrom: Value(effectiveFrom),
+    );
+  }
+
+  factory CategoryBudgetEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CategoryBudgetEntry(
+      id: serializer.fromJson<String>(json['id']),
+      categoryId: serializer.fromJson<String>(json['categoryId']),
+      percent: serializer.fromJson<int>(json['percent']),
+      effectiveFrom: serializer.fromJson<int>(json['effectiveFrom']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'categoryId': serializer.toJson<String>(categoryId),
+      'percent': serializer.toJson<int>(percent),
+      'effectiveFrom': serializer.toJson<int>(effectiveFrom),
+    };
+  }
+
+  CategoryBudgetEntry copyWith(
+          {String? id, String? categoryId, int? percent, int? effectiveFrom}) =>
+      CategoryBudgetEntry(
+        id: id ?? this.id,
+        categoryId: categoryId ?? this.categoryId,
+        percent: percent ?? this.percent,
+        effectiveFrom: effectiveFrom ?? this.effectiveFrom,
+      );
+  CategoryBudgetEntry copyWithCompanion(CategoryBudgetHistoryCompanion data) {
+    return CategoryBudgetEntry(
+      id: data.id.present ? data.id.value : this.id,
+      categoryId:
+          data.categoryId.present ? data.categoryId.value : this.categoryId,
+      percent: data.percent.present ? data.percent.value : this.percent,
+      effectiveFrom: data.effectiveFrom.present
+          ? data.effectiveFrom.value
+          : this.effectiveFrom,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoryBudgetEntry(')
+          ..write('id: $id, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('percent: $percent, ')
+          ..write('effectiveFrom: $effectiveFrom')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, categoryId, percent, effectiveFrom);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CategoryBudgetEntry &&
+          other.id == this.id &&
+          other.categoryId == this.categoryId &&
+          other.percent == this.percent &&
+          other.effectiveFrom == this.effectiveFrom);
+}
+
+class CategoryBudgetHistoryCompanion
+    extends UpdateCompanion<CategoryBudgetEntry> {
+  final Value<String> id;
+  final Value<String> categoryId;
+  final Value<int> percent;
+  final Value<int> effectiveFrom;
+  final Value<int> rowid;
+  const CategoryBudgetHistoryCompanion({
+    this.id = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.percent = const Value.absent(),
+    this.effectiveFrom = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CategoryBudgetHistoryCompanion.insert({
+    required String id,
+    required String categoryId,
+    required int percent,
+    required int effectiveFrom,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        categoryId = Value(categoryId),
+        percent = Value(percent),
+        effectiveFrom = Value(effectiveFrom);
+  static Insertable<CategoryBudgetEntry> custom({
+    Expression<String>? id,
+    Expression<String>? categoryId,
+    Expression<int>? percent,
+    Expression<int>? effectiveFrom,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (categoryId != null) 'category_id': categoryId,
+      if (percent != null) 'percent': percent,
+      if (effectiveFrom != null) 'effective_from': effectiveFrom,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CategoryBudgetHistoryCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? categoryId,
+      Value<int>? percent,
+      Value<int>? effectiveFrom,
+      Value<int>? rowid}) {
+    return CategoryBudgetHistoryCompanion(
+      id: id ?? this.id,
+      categoryId: categoryId ?? this.categoryId,
+      percent: percent ?? this.percent,
+      effectiveFrom: effectiveFrom ?? this.effectiveFrom,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (percent.present) {
+      map['percent'] = Variable<int>(percent.value);
+    }
+    if (effectiveFrom.present) {
+      map['effective_from'] = Variable<int>(effectiveFrom.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoryBudgetHistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('percent: $percent, ')
+          ..write('effectiveFrom: $effectiveFrom, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2127,12 +2487,19 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AppCategoriesTable appCategories = $AppCategoriesTable(this);
   late final $NotificationCapturesTable notificationCaptures =
       $NotificationCapturesTable(this);
+  late final $CategoryBudgetHistoryTable categoryBudgetHistory =
+      $CategoryBudgetHistoryTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [wallets, txns, appCategories, notificationCaptures];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        wallets,
+        txns,
+        appCategories,
+        notificationCaptures,
+        categoryBudgetHistory
+      ];
 }
 
 typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
@@ -2141,6 +2508,8 @@ typedef $$WalletsTableCreateCompanionBuilder = WalletsCompanion Function({
   Value<int> initialBalance,
   Value<String> type,
   Value<String?> packageName,
+  Value<int> sortOrder,
+  Value<int?> balanceCutoffAt,
   Value<int> rowid,
 });
 typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
@@ -2149,6 +2518,8 @@ typedef $$WalletsTableUpdateCompanionBuilder = WalletsCompanion Function({
   Value<int> initialBalance,
   Value<String> type,
   Value<String?> packageName,
+  Value<int> sortOrder,
+  Value<int?> balanceCutoffAt,
   Value<int> rowid,
 });
 
@@ -2176,6 +2547,13 @@ class $$WalletsTableFilterComposer
 
   ColumnFilters<String> get packageName => $composableBuilder(
       column: $table.packageName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get sortOrder => $composableBuilder(
+      column: $table.sortOrder, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt,
+      builder: (column) => ColumnFilters(column));
 }
 
 class $$WalletsTableOrderingComposer
@@ -2202,6 +2580,13 @@ class $$WalletsTableOrderingComposer
 
   ColumnOrderings<String> get packageName => $composableBuilder(
       column: $table.packageName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get sortOrder => $composableBuilder(
+      column: $table.sortOrder, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$WalletsTableAnnotationComposer
@@ -2227,6 +2612,12 @@ class $$WalletsTableAnnotationComposer
 
   GeneratedColumn<String> get packageName => $composableBuilder(
       column: $table.packageName, builder: (column) => column);
+
+  GeneratedColumn<int> get sortOrder =>
+      $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<int> get balanceCutoffAt => $composableBuilder(
+      column: $table.balanceCutoffAt, builder: (column) => column);
 }
 
 class $$WalletsTableTableManager extends RootTableManager<
@@ -2257,6 +2648,8 @@ class $$WalletsTableTableManager extends RootTableManager<
             Value<int> initialBalance = const Value.absent(),
             Value<String> type = const Value.absent(),
             Value<String?> packageName = const Value.absent(),
+            Value<int> sortOrder = const Value.absent(),
+            Value<int?> balanceCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion(
@@ -2265,6 +2658,8 @@ class $$WalletsTableTableManager extends RootTableManager<
             initialBalance: initialBalance,
             type: type,
             packageName: packageName,
+            sortOrder: sortOrder,
+            balanceCutoffAt: balanceCutoffAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -2273,6 +2668,8 @@ class $$WalletsTableTableManager extends RootTableManager<
             Value<int> initialBalance = const Value.absent(),
             Value<String> type = const Value.absent(),
             Value<String?> packageName = const Value.absent(),
+            Value<int> sortOrder = const Value.absent(),
+            Value<int?> balanceCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               WalletsCompanion.insert(
@@ -2281,6 +2678,8 @@ class $$WalletsTableTableManager extends RootTableManager<
             initialBalance: initialBalance,
             type: type,
             packageName: packageName,
+            sortOrder: sortOrder,
+            balanceCutoffAt: balanceCutoffAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -3137,6 +3536,172 @@ typedef $$NotificationCapturesTableProcessedTableManager
         ),
         NotificationCapture,
         PrefetchHooks Function()>;
+typedef $$CategoryBudgetHistoryTableCreateCompanionBuilder
+    = CategoryBudgetHistoryCompanion Function({
+  required String id,
+  required String categoryId,
+  required int percent,
+  required int effectiveFrom,
+  Value<int> rowid,
+});
+typedef $$CategoryBudgetHistoryTableUpdateCompanionBuilder
+    = CategoryBudgetHistoryCompanion Function({
+  Value<String> id,
+  Value<String> categoryId,
+  Value<int> percent,
+  Value<int> effectiveFrom,
+  Value<int> rowid,
+});
+
+class $$CategoryBudgetHistoryTableFilterComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get percent => $composableBuilder(
+      column: $table.percent, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom, builder: (column) => ColumnFilters(column));
+}
+
+class $$CategoryBudgetHistoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get percent => $composableBuilder(
+      column: $table.percent, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom,
+      builder: (column) => ColumnOrderings(column));
+}
+
+class $$CategoryBudgetHistoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CategoryBudgetHistoryTable> {
+  $$CategoryBudgetHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get categoryId => $composableBuilder(
+      column: $table.categoryId, builder: (column) => column);
+
+  GeneratedColumn<int> get percent =>
+      $composableBuilder(column: $table.percent, builder: (column) => column);
+
+  GeneratedColumn<int> get effectiveFrom => $composableBuilder(
+      column: $table.effectiveFrom, builder: (column) => column);
+}
+
+class $$CategoryBudgetHistoryTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $CategoryBudgetHistoryTable,
+    CategoryBudgetEntry,
+    $$CategoryBudgetHistoryTableFilterComposer,
+    $$CategoryBudgetHistoryTableOrderingComposer,
+    $$CategoryBudgetHistoryTableAnnotationComposer,
+    $$CategoryBudgetHistoryTableCreateCompanionBuilder,
+    $$CategoryBudgetHistoryTableUpdateCompanionBuilder,
+    (
+      CategoryBudgetEntry,
+      BaseReferences<_$AppDatabase, $CategoryBudgetHistoryTable,
+          CategoryBudgetEntry>
+    ),
+    CategoryBudgetEntry,
+    PrefetchHooks Function()> {
+  $$CategoryBudgetHistoryTableTableManager(
+      _$AppDatabase db, $CategoryBudgetHistoryTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CategoryBudgetHistoryTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CategoryBudgetHistoryTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CategoryBudgetHistoryTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> categoryId = const Value.absent(),
+            Value<int> percent = const Value.absent(),
+            Value<int> effectiveFrom = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoryBudgetHistoryCompanion(
+            id: id,
+            categoryId: categoryId,
+            percent: percent,
+            effectiveFrom: effectiveFrom,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String categoryId,
+            required int percent,
+            required int effectiveFrom,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoryBudgetHistoryCompanion.insert(
+            id: id,
+            categoryId: categoryId,
+            percent: percent,
+            effectiveFrom: effectiveFrom,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$CategoryBudgetHistoryTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $CategoryBudgetHistoryTable,
+        CategoryBudgetEntry,
+        $$CategoryBudgetHistoryTableFilterComposer,
+        $$CategoryBudgetHistoryTableOrderingComposer,
+        $$CategoryBudgetHistoryTableAnnotationComposer,
+        $$CategoryBudgetHistoryTableCreateCompanionBuilder,
+        $$CategoryBudgetHistoryTableUpdateCompanionBuilder,
+        (
+          CategoryBudgetEntry,
+          BaseReferences<_$AppDatabase, $CategoryBudgetHistoryTable,
+              CategoryBudgetEntry>
+        ),
+        CategoryBudgetEntry,
+        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3148,4 +3713,6 @@ class $AppDatabaseManager {
       $$AppCategoriesTableTableManager(_db, _db.appCategories);
   $$NotificationCapturesTableTableManager get notificationCaptures =>
       $$NotificationCapturesTableTableManager(_db, _db.notificationCaptures);
+  $$CategoryBudgetHistoryTableTableManager get categoryBudgetHistory =>
+      $$CategoryBudgetHistoryTableTableManager(_db, _db.categoryBudgetHistory);
 }

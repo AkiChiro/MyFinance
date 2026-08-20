@@ -22,6 +22,7 @@ get:
 	$(FLUTTER) pub get
 
 gen: get
+	$(FLUTTER) gen-l10n
 	$(FLUTTER) pub run pigeon --input pigeons/capture_channel.dart
 	$(FLUTTER) pub run build_runner build --delete-conflicting-outputs
 

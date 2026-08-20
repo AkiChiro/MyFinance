@@ -9,11 +9,16 @@ import '../services/csv_service.dart';
 const _uuid = Uuid();
 
 /// Thrown when a spending or transfer would push a wallet below zero.
+/// The UI resolves the localized message from AppLocalizations.overspendError.
 class OverspendException implements Exception {
-  final String message;
-  const OverspendException([this.message = 'Hãy kiểm tra lại số tiền thực tế']);
-  @override
-  String toString() => message;
+  const OverspendException();
+}
+
+/// Thrown when a new budget percent would push the sum across all active
+/// spending categories above 100%. Mirrors OverspendException — a zero-
+/// payload marker; the UI resolves the localized message at the catch site.
+class BudgetPercentExceededException implements Exception {
+  const BudgetPercentExceededException();
 }
 
 class FinanceRepository {
@@ -34,6 +39,11 @@ class FinanceRepository {
   Stream<int> pendingCaptureCount() => db.pendingCaptureCount();
   Future<List<Wallet>> allWallets() => db.allWallets();
 
+  /// Envelope budgeting: {categoryId → current derived balance}. Cumulative
+  /// since forever (not month-scoped) — see docs/architecture.md "Envelope
+  /// budgeting computation".
+  Stream<Map<String, int>> watchEnvelopeBalances() => db.watchEnvelopeBalances();
+
   // ── Categories ────────────────────────────────────────────────────────────────
 
   Stream<List<AppCategory>> watchActiveCategories(String kind) =>
@@ -45,21 +55,30 @@ class FinanceRepository {
   Future<Map<String, int>> categoryThresholds(String kind) =>
       db.categoryThresholds(kind);
 
-  Future<void> addCategory({
+  /// Envelope budgeting: current effective % per category (latest history
+  /// row wins). A category absent from the map has never had one set (0%).
+  Stream<Map<String, int>> watchCategoryBudgetPercents() =>
+      db.watchCategoryBudgetPercents();
+
+  /// Returns the new category's id (mirrors addWallet — callers that need to
+  /// immediately act on the created row, e.g. setting a budget %, need it).
+  Future<String> addCategory({
     required String label,
     required String kind,
     int threshold = 0,
   }) async {
     final existing = await db.activeCategories(kind);
+    final id = _uuid.v4();
     await db.into(db.appCategories).insert(
           AppCategoriesCompanion.insert(
-            id: _uuid.v4(),
+            id: id,
             label: label,
             kind: kind,
             threshold: Value(threshold),
             sortOrder: Value(existing.length),
           ),
         );
+    return id;
   }
 
   Future<void> updateCategory(AppCategory cat) =>
@@ -82,6 +101,32 @@ class FinanceRepository {
   Future<void> setCategoryThreshold(String id, int threshold) =>
       (db.update(db.appCategories)..where((c) => c.id.equals(id)))
           .write(AppCategoriesCompanion(threshold: Value(threshold)));
+
+  /// Envelope budgeting: appends a new effective-now percent for [categoryId]
+  /// (never mutates an existing row — see CategoryBudgetHistory doc-comment).
+  /// Throws [BudgetPercentExceededException] if [percent] plus every other
+  /// active spending category's current percent would exceed 100%; [percent]
+  /// itself replaces (not adds to) categoryId's own prior contribution.
+  Future<void> setCategoryBudgetPercent(String categoryId, int percent) async {
+    await db.transaction(() async {
+      final activeSpending = await db.activeCategories(TxTypes.spending);
+      final current = await db.categoryBudgetPercents();
+      final sum = percent +
+          activeSpending
+              .where((c) => c.id != categoryId)
+              .fold<int>(0, (s, c) => s + (current[c.id] ?? 0));
+      if (sum > 100) throw const BudgetPercentExceededException();
+
+      await db.into(db.categoryBudgetHistory).insert(
+            CategoryBudgetHistoryCompanion.insert(
+              id: _uuid.v4(),
+              categoryId: categoryId,
+              percent: percent,
+              effectiveFrom: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            ),
+          );
+    });
+  }
 
   // ── Balance ─────────────────────────────────────────────────────────────────
 
@@ -124,15 +169,49 @@ class FinanceRepository {
     String? packageName,
   }) async {
     final id = _uuid.v4();
-    await db.into(db.wallets).insert(WalletsCompanion.insert(
-          id: id,
-          name: name,
-          initialBalance: Value(initialBalance),
-          type: Value(type),
-          packageName: Value(packageName),
-        ));
+    // Raw SQL sets sort_order = current count so the new wallet appends at bottom.
+    // WalletsCompanion doesn't include sortOrder until build_runner regenerates.
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO wallets (id, name, initial_balance, type, package_name, sort_order) '
+        'VALUES (?, ?, ?, ?, ?, (SELECT COUNT(*) FROM wallets))',
+        [id, name, initialBalance, type, packageName],
+      );
+      db.markTablesUpdated({db.wallets});
+    });
     return id;
   }
+
+  Future<void> updateWallet({
+    required String id,
+    required String name,
+    required int initialBalance,
+    required String type,
+    required Value<String?> packageName,
+    bool resetTransactions = false,
+  }) async {
+    await db.transaction(() async {
+      await (db.update(db.wallets)..where((w) => w.id.equals(id))).write(
+        WalletsCompanion(
+          name: Value(name),
+          initialBalance: Value(initialBalance),
+          type: Value(type),
+          packageName: packageName,
+        ),
+      );
+      if (resetTransactions) {
+        // Set a per-wallet cutoff timestamp so only future txns affect this
+        // wallet's balance. Other wallets are unaffected (no global flag change).
+        await db.customStatement(
+          'UPDATE wallets SET balance_cutoff_at = ? WHERE id = ?',
+          [DateTime.now().millisecondsSinceEpoch ~/ 1000, id],
+        );
+      }
+    });
+  }
+
+  Future<void> updateWalletsOrder(List<String> ids) =>
+      db.updateWalletsOrder(ids);
 
   /// Atomically clears [packageName] from whichever wallet currently holds it
   /// and assigns it to [newWalletId]. Safe to call when no wallet currently
@@ -161,13 +240,37 @@ class FinanceRepository {
 
   // ── Create transactions ──────────────────────────────────────────────────────
 
+  /// Returns true if [amount] for [category] exceeds its configured threshold.
+  /// Reads from DB, so call this outside any existing transaction.
+  Future<bool> _shouldAutoStar({
+    required int amount,
+    required String? category,
+    required String kind,
+    required bool autostarEnabled,
+  }) async {
+    if (!autostarEnabled || category == null) return false;
+    final thresholds = await db.categoryThresholds(kind);
+    final limit = thresholds[category] ?? 0;
+    return limit > 0 && amount > limit;
+  }
+
   Future<void> addSpending({
     required int amount,
     required String walletId,
     required String category,
     String? description,
     DateTime? timestamp,
+    bool starred = false,
+    bool autostarEnabled = true,
   }) async {
+    // Auto-star check happens before the DB transaction (read-only, safe).
+    final effectiveStarred = starred ||
+        await _shouldAutoStar(
+          amount: amount,
+          category: category,
+          kind: TxTypes.spending,
+          autostarEnabled: autostarEnabled,
+        );
     await db.transaction(() async {
       await _assertSufficient(walletId, amount);
       final now = DateTime.now();
@@ -180,6 +283,7 @@ class FinanceRepository {
             category: Value(category),
             timestamp: timestamp ?? now,
             createdAt: now,
+            starred: Value(effectiveStarred),
           ));
     });
   }
@@ -190,7 +294,16 @@ class FinanceRepository {
     required String category,
     String? description,
     DateTime? timestamp,
+    bool starred = false,
+    bool autostarEnabled = true,
   }) async {
+    final effectiveStarred = starred ||
+        await _shouldAutoStar(
+          amount: amount,
+          category: category,
+          kind: TxTypes.earning,
+          autostarEnabled: autostarEnabled,
+        );
     final now = DateTime.now();
     await db.into(db.txns).insert(TxnsCompanion.insert(
           id: _uuid.v4(),
@@ -201,6 +314,7 @@ class FinanceRepository {
           category: Value(category),
           timestamp: timestamp ?? now,
           createdAt: now,
+          starred: Value(effectiveStarred),
         ));
   }
 
@@ -227,12 +341,30 @@ class FinanceRepository {
 
   // ── Edit / delete ────────────────────────────────────────────────────────────
 
-  Future<void> updateTxn(Txn t) async {
-    await db.transaction(() async {
-      if (t.type == TxTypes.spending || t.type == TxTypes.transfer) {
-        await _assertSufficient(t.walletId, t.amount, excludeId: t.id);
+  Future<void> updateTxn(Txn t, {bool autostarEnabled = true}) async {
+    // If amount changed on a spending/earning txn, re-run auto-star check.
+    Txn effective = t;
+    if (autostarEnabled &&
+        (t.type == TxTypes.spending || t.type == TxTypes.earning) &&
+        t.category != null) {
+      final original = await db.txnById(t.id);
+      if (original != null && original.amount != t.amount) {
+        final autoStar = await _shouldAutoStar(
+          amount: t.amount,
+          category: t.category,
+          kind: t.type,
+          autostarEnabled: autostarEnabled,
+        );
+        if (autoStar) effective = t.copyWith(starred: true);
       }
-      await db.update(db.txns).replace(t);
+    }
+    await db.transaction(() async {
+      if (effective.type == TxTypes.spending ||
+          effective.type == TxTypes.transfer) {
+        await _assertSufficient(effective.walletId, effective.amount,
+            excludeId: effective.id);
+      }
+      await db.update(db.txns).replace(effective);
     });
   }
 
@@ -259,6 +391,13 @@ class FinanceRepository {
   /// Not a hash — stores the full string so dedup is a plain equality check.
   static String _dedupKey(String packageName, String rawText) =>
       '$packageName\x1e${_normalizeText(rawText)}';
+
+  /// Fetches a single capture by id, or `null` if it no longer exists
+  /// (e.g. already dismissed/confirmed and — not currently possible, rows are
+  /// never deleted — or a stale id from a notification payload).
+  Future<NotificationCapture?> captureById(String id) =>
+      (db.select(db.notificationCaptures)..where((c) => c.id.equals(id)))
+          .getSingleOrNull();
 
   /// Inserts a notification capture with dedup and wallet-resolution.
   ///

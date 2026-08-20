@@ -28,7 +28,6 @@ Write observations in the **Result** block under each section.
 **Result:**
 ```
 All tabs works perfectly fine funtionality-wise.
-
 ```
 
 ---
@@ -43,15 +42,15 @@ All tabs works perfectly fine funtionality-wise.
 5. Return to the app.
 
 **Steps:**
-- [ ] "Nhà phát triển" section visible in Settings
-- [ ] Tapping the tile opens the system notification-listener screen
-- [ ] MyFinance appears in the list
-- [ ] Permission toggled on without errors
-- [ ] Returning to the app does not crash
+- [ ] "Nhà phát triển" section visible in Settings ✅ pass
+- [ ] Tapping the tile opens the system notification-listener screen ✅ pass
+- [ ] MyFinance appears in the list ✅ pass
+- [ ] Permission toggled on without errors ✅ pass
+- [ ] Returning to the app does not crash ✅ pass
 
 **Result:**
 ```
-(write observations here)
+I have to first manually go into the App manager and then into the app to remove restriction first and then after that I can go into the app and enable the permissions after pressing the "Cấp quyền nghe thông báo" button.
 ```
 
 ---
@@ -70,17 +69,18 @@ All tabs works perfectly fine funtionality-wise.
    - Techcombank: `com.techcombank.mb`
 
 **Steps:**
-- [ ] At least one bank notification triggered
-- [ ] "Gói ứng dụng đã thấy" dialog opens and shows package names
-- [ ] Package names are selectable / copyable from the dialog
-- [ ] OCB package name observed: ________________
-- [ ] MB package name observed: ________________
-- [ ] Techcombank package name observed: ________________
-- [ ] Constants in `BankPackages` match (or note any mismatch)
+- [ ] At least one bank notification triggered  ✅ pass
+- [ ] "Gói ứng dụng đã thấy" dialog opens and shows package names ✅ pass
+- [ ] Package names are selectable / copyable from the dialog ✅ pass
+- [ ] OCB package name observed: 'vn.com.ocb.awe' (I have personally change the const name inside the code after seeing the package name and it does work after the change)
+- [ ] MB package name observed: `com.mbmobile`
+- [ ] Techcombank package name observed: 'vn.com.techcombank.bb.app' (Same case with OCB)
+- [ ] Constants in `BankPackages` match (or note any mismatch) 
 
 **Result:**
 ```
 (write observations here — paste actual package names if they differ from the constants)
+I have paste the actual package names of Techcombank and OCB into the bank_notification_parser.dart file. which made the bank notice works but instead of the bank name like OCB or Techcombank, It shows the package name. MB bank works fine.
 ```
 
 ---
@@ -107,18 +107,18 @@ All tabs works perfectly fine funtionality-wise.
 5. Verify by checking both wallet subtitles.
 
 **Steps:**
-- [ ] Add-wallet dialog shows "Ngân hàng liên kết" dropdown
-- [ ] Wallet created with bank link; subtitle shows bank name correctly
-- [ ] Long-press opens bottom sheet with both options
-- [ ] "Sửa liên kết ngân hàng" opens a picker pre-filled with current bank
-- [ ] Clearing the link (pick "— Không liên kết —") works
-- [ ] Uniqueness conflict dialog appears when picking an already-linked bank
-- [ ] "Chuyển" atomically moves the link (old wallet loses it, new wallet gets it)
-- [ ] Cancelling the conflict dialog leaves data unchanged
+- [ ] Add-wallet dialog shows "Ngân hàng liên kết" dropdown ✅ pass
+- [ ] Wallet created with bank link; subtitle shows bank name correctly ✅ pass
+- [ ] Long-press opens bottom sheet with both options ✅ pass
+- [ ] "Sửa liên kết ngân hàng" opens a picker pre-filled with current bank ✅ pass
+- [ ] Clearing the link (pick "— Không liên kết —") works ✅ pass
+- [ ] Uniqueness conflict dialog appears when picking an already-linked bank ✅ pass
+- [ ] "Chuyển" atomically moves the link (old wallet loses it, new wallet gets it) ✅ pass
+- [ ] Cancelling the conflict dialog leaves data unchanged ✅ pass
 
 **Result:**
 ```
-(write observations here)
+Works perfectly fine
 ```
 
 ---
@@ -135,14 +135,17 @@ All tabs works perfectly fine funtionality-wise.
 5. If there is a pending capture, a banner card should appear at the top of the list: **"X thông báo ngân hàng chờ xác nhận"**.
 
 **Steps:**
-- [ ] Bank notification triggered while app was in background
-- [ ] Returning to app drains the buffer without crashing
-- [ ] Banner card appears in Giao dịch tab (if capture was filed)
-- [ ] Badge number on the Giao dịch tab icon matches the banner count
+- [ ] Bank notification triggered while app was in background ✅ pass
+- [ ] Returning to app drains the buffer without crashing ✅ pass
+- [ ] Banner card appears in Giao dịch tab (if capture was filed) ✅ pass
+- [ ] Badge number on the Giao dịch tab icon matches the banner count ✅ pass
 
 **Result:**
 ```
 (write observations here — if no banner appears, note whether the notification showed in the "Gói đã thấy" dialog)
+After all settings are good, I tried doing a bunch of notifications with some apps (bank and non-bank). All of which are capture in "Gói đã thấy" dialog. Banks notifications (specifically the transactions) were captured perfectly and put into the Giao dịch "notification" banner. Any other notifications apart from those were not captured so there has been no "Unparsed" situation observed yet.
+
+**Note: This case may need to be further examined in the future. Basically when I first downloaded the new apk and test it a week ago, it worked fine but today when I tried testing the notification again, it doesn't work but then I redownloaded the apk and it works again. Will be further noticed once I've seen the consistency of this case. 
 ```
 
 ---
@@ -160,17 +163,17 @@ All tabs works perfectly fine funtionality-wise.
 - **Unparsed** (parseStatus = unparsed): red ⚠ icon, **"Chưa đọc được"** chip, amount shows "—"
 
 **Steps:**
-- [ ] Banner / badge taps open the inbox screen
-- [ ] Inbox title is "Thông báo ngân hàng"
-- [ ] At least one capture visible with correct wallet name
-- [ ] Amount and direction sign are correct
-- [ ] Timestamp matches when the notification was received (not today if it was older)
-- [ ] At least one tile style verified (note which: parsed / needsReview / unparsed)
-- [ ] Empty state message shows when inbox is empty
+- [ ] Banner / badge taps open the inbox screen ✅ pass
+- [ ] Inbox title is "Thông báo ngân hàng" ✅ pass
+- [ ] At least one capture visible with correct wallet name ✅ pass
+- [ ] Amount and direction sign are correct ✅ pass
+- [ ] Timestamp matches when the notification was received (not today if it was older) ✅ pass
+- [ ] At least one tile style verified (note which: parsed / needsReview / unparsed) ✅ pass (parsed)
+- [ ] Empty state message shows when inbox is empty ✅ pass
 
 **Result:**
 ```
-(write observations here)
+So far I've only encountered the parsed tile so I can't say more about the other tiles style.
 ```
 
 ---
@@ -188,26 +191,26 @@ All tabs works perfectly fine funtionality-wise.
 8. Go to **Giao dịch** tab and verify the new transaction appears with the correct date, amount, wallet.
 
 **Steps:**
-- [ ] Confirm screen opens with pre-filled direction
-- [ ] Confirm screen opens with pre-filled amount
-- [ ] Confirm screen opens with pre-filled wallet
-- [ ] Date field shows `capturedAt` timestamp (not today)
-- [ ] Raw notification text visible as reference card at bottom
-- [ ] "Ví *" label indicates wallet is required
-- [ ] Confirm without selecting a wallet shows an error snackbar
-- [ ] Confirm succeeds after wallet is selected
-- [ ] Confirmed capture removed from inbox; badge decrements
-- [ ] Transaction appears in Giao dịch with **correct date** (matches capturedAt)
-- [ ] Transaction source is bank notification (tile shows correctly)
+- [ ] Confirm screen opens with pre-filled direction ✅ pass
+- [ ] Confirm screen opens with pre-filled amount ✅ pass
+- [ ] Confirm screen opens with pre-filled wallet ✅ pass
+- [ ] Date field shows `capturedAt` timestamp (not today) ✅ pass
+- [ ] Raw notification text visible as reference card at bottom ✅ pass
+- [ ] "Ví *" label indicates wallet is required ✅ pass
+- [ ] Confirm without selecting a wallet shows an error snackbar ✅ pass
+- [ ] Confirm succeeds after wallet is selected ✅ pass
+- [ ] Confirmed capture removed from inbox; badge decrements ✅ pass
+- [ ] Transaction appears in Giao dịch with **correct date** (matches capturedAt) ✅ pass
+- [ ] Transaction source is bank notification (tile shows correctly) ✅ pass
 
 **Result:**
 ```
-(write observations here)
+No problems here.
 ```
 
 ---
 
-## 8. Confirm screen — unparsed capture (Phase 5d)
+## 8. Confirm screen — unparsed capture (Phase 5d) // Will check later
 
 **Context:** An unparsed capture means the parser couldn't read the notification. The user must enter amount and direction manually; the raw text is shown prominently so they can read it.
 
@@ -252,16 +255,16 @@ All tabs works perfectly fine funtionality-wise.
 6. No transaction should be created.
 
 **Steps:**
-- [ ] "Bỏ qua" button visible in the app bar
-- [ ] Confirmation dialog appears before dismissing
-- [ ] Cancelling the dialog leaves the capture in the inbox
-- [ ] Confirming dismiss removes the capture from the inbox
-- [ ] Badge decrements correctly
-- [ ] No transaction created in Giao dịch tab
+- [ ] "Bỏ qua" button visible in the app bar ✅ pass
+- [ ] Confirmation dialog appears before dismissing ✅ pass
+- [ ] Cancelling the dialog leaves the capture in the inbox ✅ pass
+- [ ] Confirming dismiss removes the capture from the inbox ✅ pass
+- [ ] Badge decrements correctly ✅ pass
+- [ ] No transaction created in Giao dịch tab ✅ pass
 
 **Result:**
 ```
-(write observations here)
+Works fine.
 ```
 
 ---
@@ -278,13 +281,14 @@ All tabs works perfectly fine funtionality-wise.
 5. Verify the transaction date matches `capturedAt`, not today's date.
 
 **Steps:**
-- [ ] Confirm screen shows `capturedAt` date in the time field (not now)
-- [ ] After confirming, transaction date in Giao dịch matches `capturedAt`
-- [ ] Analytics page (Thống kê) shows the transaction in the correct month
+- [ ] Confirm screen shows `capturedAt` date in the time field (not now) ✅ pass
+- [ ] After confirming, transaction date in Giao dịch matches `capturedAt` ✅ pass
+- [ ] Analytics page (Thống kê) shows the transaction in the correct month ✅ pass
 
 **Result:**
 ```
 (write observations here — note both the capturedAt time and the transaction timestamp you see in the list)
+Works fine.
 ```
 
 ---
@@ -295,20 +299,20 @@ A single pass through the entire Phase 5 journey.
 
 | Step | Action | Expected |
 |------|--------|----------|
-| 1 | Permission granted (Section 2) | Listener active |
-| 2 | Bank-linked wallet created (Section 4) | Wallet shows bank name in subtitle |
-| 3 | Real bank transaction triggered (e.g. transfer) | Notification appears on device |
-| 4 | App foregrounded | Drain runs silently |
-| 5 | Giao dịch tab | Badge shows count; banner visible |
-| 6 | Banner tapped | Inbox opens, capture listed |
-| 7 | Capture tapped | Confirm screen with pre-filled wallet |
-| 8 | Confirm tapped | Inbox clears; badge drops to 0 |
-| 9 | Giao dịch tab | New transaction visible, correct date |
-| 10 | Thống kê tab | New transaction counted in correct month |
+| 1 | Permission granted (Section 2) | Listener active | ✅ pass
+| 2 | Bank-linked wallet created (Section 4) | Wallet shows bank name in subtitle | ✅ pass
+| 3 | Real bank transaction triggered (e.g. transfer) | Notification appears on device | ✅ pass
+| 4 | App foregrounded | Drain runs silently | ✅ pass
+| 5 | Giao dịch tab | Badge shows count; banner visible | ✅ pass
+| 6 | Banner tapped | Inbox opens, capture listed | ✅ pass
+| 7 | Capture tapped | Confirm screen with pre-filled wallet | ✅ pass
+| 8 | Confirm tapped | Inbox clears; badge drops to 0 | ✅ pass
+| 9 | Giao dịch tab | New transaction visible, correct date | ✅ pass
+| 10 | Thống kê tab | New transaction counted in correct month | ✅ pass
 
 **Result:**
 ```
-(write observations here — note any step that didn't match the expected column)
+Runs perfectly fine.
 ```
 
 ---
@@ -319,15 +323,16 @@ After completing Sections 3 and 5, fill in the verified package names here. Thes
 
 | Bank | Current constant | Observed on device | Match? |
 |------|-----------------|-------------------|--------|
-| OCB | `com.ocb.app` | | |
-| MB | `com.mbmobile` | | |
-| Techcombank | `com.techcombank.mb` | | |
+| OCB | `com.ocb.app` |vn.com.ocb.awe | No |  
+| MB | `com.mbmobile` |com.mbmobile | Yes |
+| Techcombank | `com.techcombank.mb` |vn.com.techcombank.bb.app | No |
 
 If any package name differs, the parser will never match notifications from that bank — all captures will land as `unparsed`. Update the constant and rebuild before the final sign-off.
 
 **Result:**
 ```
 (record final verified constants here)
+I have already detail stuff related to this in section 3 and 5 so refer back to them.
 ```
 
 ---
@@ -336,15 +341,15 @@ If any package name differs, the parser will never match notifications from that
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Notification listener permission | | |
-| Package discovery / BankPackages constants | | |
-| Wallet bank-link (add + edit + uniqueness) | | |
-| Capture drain on launch/resume | | |
-| Inbox (badge, banner, tile styles) | | |
-| Confirm — parsed capture | | |
-| Confirm — unparsed capture | | |
-| Dismiss | | |
-| Transaction date correctness | | |
-| Full end-to-end | | |
+| Notification listener permission | Good | |
+| Package discovery / BankPackages constants | Good | |
+| Wallet bank-link (add + edit + uniqueness) | Good | |
+| Capture drain on launch/resume | Work but still Unknown overall | Need to be further used to check |
+| Inbox (badge, banner, tile styles) | Good | Unparsed still not been checked yet |
+| Confirm — parsed capture | Good | |
+| Confirm — unparsed capture | Unknown | |
+| Dismiss | Good | |
+| Transaction date correctness | Good | |
+| Full end-to-end | Good | |
 
 **Overall:** ☐ Ready to merge &nbsp;&nbsp; ☐ Needs fixes (see sections above)

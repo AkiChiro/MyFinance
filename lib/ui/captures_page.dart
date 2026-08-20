@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
 import '../format.dart';
+import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
+import '../services/bank/bank_notification_parser.dart';
 import 'capture_confirm_page.dart';
 
 class CapturesPage extends ConsumerWidget {
@@ -13,8 +15,9 @@ class CapturesPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.read(repositoryProvider);
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(title: const Text('Thông báo ngân hàng')),
+      appBar: AppBar(title: Text(l10n.capturesTitle)),
       body: StreamBuilder<List<Wallet>>(
         stream: repo.watchWallets(),
         builder: (context, wSnap) {
@@ -25,8 +28,8 @@ class CapturesPage extends ConsumerWidget {
             builder: (context, snap) {
               final captures = snap.data ?? const [];
               if (captures.isEmpty) {
-                return const Center(
-                  child: Text('Không có thông báo nào cần xem.'),
+                return Center(
+                  child: Text(l10n.capturesEmpty),
                 );
               }
               return ListView.builder(
@@ -52,14 +55,15 @@ class _CaptureTile extends StatelessWidget {
   final Map<String, String> walletMap;
 
   static const _bankLabels = <String, String>{
-    'com.ocb.app': 'OCB',
-    'com.mbmobile': 'MB',
-    'com.techcombank.mb': 'Techcombank',
+    BankPackages.ocb: 'OCB',
+    BankPackages.mb: 'MB',
+    BankPackages.techcombank: 'Techcombank',
   };
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context)!;
 
     final (IconData icon, Color color, String statusLabel) =
         switch (capture.parseStatus) {
@@ -71,12 +75,12 @@ class _CaptureTile extends StatelessWidget {
       ParseStatus.needsReview => (
           Icons.help_outline,
           Colors.orange.shade700,
-          'Cần xem lại'
+          l10n.capturesNeedsReview
         ),
       ParseStatus.unparsed => (
           Icons.warning_amber_outlined,
           scheme.error,
-          'Chưa đọc được'
+          l10n.capturesUnparsed
         ),
     };
 
