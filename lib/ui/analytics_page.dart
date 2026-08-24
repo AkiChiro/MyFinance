@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/database.dart';
@@ -7,6 +8,7 @@ import '../format.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../models/domain.dart';
 import '../providers.dart';
+import '../repositories/finance_repository.dart';
 import 'category_colors.dart';
 import 'widgets/app_icon.dart';
 
@@ -146,7 +148,7 @@ class _AnalyticsPageState extends ConsumerState<AnalyticsPage> {
                   const SizedBox(height: 16),
                 ],
                 _EnvelopeSection(
-                  catLabels: catLabels,
+                  categories: catSnap.data ?? const <AppCategory>[],
                   onRowTap: (category) =>
                       _drillDown(type: TxTypes.spending, category: category),
                 ),
@@ -658,18 +660,18 @@ class _PieSectionState extends State<_PieSection> {
 }
 
 // ---------------------------------------------------------------------------
-// Envelope budgeting — per-category remaining "stack"
+// Envelope budgeting — per-category allocation progress
 // ---------------------------------------------------------------------------
 //
 // Unlike the rest of this page's data (_Stats/AnalyticsBundle, all month-
 // scoped), envelope balances are cumulative since forever — a category's
 // stack carries over month to month until spent — so this section keeps its
-// own subscription rather than being folded into _Stats. Minimal display
-// only (a plain list, no progress bars) — see docs/architecture.md for the
-// reasoning; visual treatment is expected to be refined separately.
+// own subscription rather than being folded into _Stats. Only categories
+// with a currently-configured percent > 0 are shown; a 0% category has no
+// budget to be "over" against, so listing it would be misleading.
 class _EnvelopeSection extends ConsumerWidget {
-  const _EnvelopeSection({required this.catLabels, required this.onRowTap});
-  final Map<String, String> catLabels;
+  const _EnvelopeSection({required this.categories, required this.onRowTap});
+  final List<AppCategory> categories;
   final void Function(String categoryId) onRowTap;
 
   @override
@@ -677,63 +679,235 @@ class _EnvelopeSection extends ConsumerWidget {
     final repo = ref.read(repositoryProvider);
     final l10n = AppLocalizations.of(context)!;
     return StreamBuilder<Map<String, int>>(
-      stream: repo.watchEnvelopeBalances(),
-      builder: (context, snap) {
-        final balances = snap.data ?? const <String, int>{};
-        if (balances.isEmpty) return const SizedBox.shrink();
-        final errorColor = Theme.of(context).colorScheme.error;
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(l10n.analyticsEnvelopeSectionTitle,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                for (final entry in balances.entries)
-                  InkWell(
-                    onTap: () => onRowTap(entry.key),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                                color: spendColor(entry.key),
-                                shape: BoxShape.circle),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              catLabels[entry.key] ??
-                                  Categories.label(l10n, entry.key),
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                          Text(
-                            formatVnd(entry.value),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: entry.value < 0 ? errorColor : null,
-                            ),
-                          ),
-                        ],
+      stream: repo.watchCategoryBudgetPercents(),
+      builder: (context, pctSnap) {
+        final percents = pctSnap.data ?? const <String, int>{};
+        final budgeted = categories
+            .where((c) =>
+                c.kind == TxTypes.spending &&
+                !c.archived &&
+                (percents[c.id] ?? 0) > 0)
+            .toList();
+        if (budgeted.isEmpty) return const SizedBox.shrink();
+        return StreamBuilder<Map<String, EnvelopeStatus>>(
+          stream: repo.watchEnvelopeBalances(),
+          builder: (context, envSnap) {
+            final statuses =
+                envSnap.data ?? const <String, EnvelopeStatus>{};
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(l10n.analyticsEnvelopeSectionTitle,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    for (final cat in budgeted)
+                      _EnvelopeRow(
+                        category: cat,
+                        percent: percents[cat.id]!,
+                        status: statuses[cat.id] ??
+                            const EnvelopeStatus(allocated: 0, spent: 0),
+                        onTap: () => onRowTap(cat.id),
+                        onEdit: () => _showEnvelopeEditDialog(
+                            context, cat, repo, percents[cat.id]!),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
   }
+}
+
+class _EnvelopeRow extends StatelessWidget {
+  const _EnvelopeRow({
+    required this.category,
+    required this.percent,
+    required this.status,
+    required this.onTap,
+    required this.onEdit,
+  });
+  final AppCategory category;
+  final int percent;
+  final EnvelopeStatus status;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    final color = spendColor(category.id);
+    final notFunded = status.allocated == 0 && status.spent == 0;
+    final over = status.spent > status.allocated;
+    final ratio = notFunded
+        ? 0.0
+        : status.allocated > 0
+            ? (status.spent / status.allocated).clamp(0.0, 1.0)
+            : 1.0;
+    final String caption;
+    if (notFunded) {
+      caption = l10n.analyticsEnvelopeNotFundedYet;
+    } else if (over) {
+      caption = l10n.analyticsEnvelopeOverBy(
+          formatVnd(status.spent - status.allocated));
+    } else {
+      caption = l10n.analyticsEnvelopeRemaining(formatVnd(status.balance));
+    }
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration:
+                      BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    category.label,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+                Text(
+                  '$percent%',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onEdit,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: ratio,
+                minHeight: 6,
+                backgroundColor: scheme.surfaceContainerHighest,
+                valueColor:
+                    AlwaysStoppedAnimation(over ? scheme.error : color),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              caption,
+              style: TextStyle(
+                fontSize: 12,
+                color: over ? scheme.error : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _showEnvelopeEditDialog(
+  BuildContext context,
+  AppCategory cat,
+  FinanceRepository repo,
+  int currentPercent,
+) async {
+  final l10n = AppLocalizations.of(context)!;
+  final pctCtrl = TextEditingController(
+      text: currentPercent > 0 ? currentPercent.toString() : '');
+  String? error;
+
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setDialogState) => AlertDialog(
+        title: Text(l10n.analyticsEnvelopeEditTitle(cat.label)),
+        content: TextField(
+          controller: pctCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: l10n.categoriesBudgetPercentFieldOptional,
+            suffixText: '%',
+            errorText: error,
+          ),
+        ),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _confirmResetEnvelope(context, cat, repo);
+            },
+            child: Text(l10n.analyticsEnvelopeResetTrigger),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final percent = (int.tryParse(pctCtrl.text) ?? 0).clamp(0, 100);
+                  if (percent != currentPercent) {
+                    try {
+                      await repo.setCategoryBudgetPercent(cat.id, percent);
+                    } on BudgetPercentExceededException {
+                      setDialogState(() => error = l10n.budgetPercentExceededError);
+                      return;
+                    }
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                child: Text(l10n.commonSave),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+  pctCtrl.dispose();
+}
+
+Future<void> _confirmResetEnvelope(
+    BuildContext context, AppCategory cat, FinanceRepository repo) async {
+  final l10n = AppLocalizations.of(context)!;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text(l10n.analyticsEnvelopeResetConfirmTitle(cat.label)),
+      content: Text(l10n.analyticsEnvelopeResetConfirmBody),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text(l10n.commonCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(l10n.analyticsEnvelopeResetAction),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) await repo.resetEnvelope(cat.id);
 }
 
 // ---------------------------------------------------------------------------

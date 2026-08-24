@@ -39,10 +39,11 @@ class FinanceRepository {
   Stream<int> pendingCaptureCount() => db.pendingCaptureCount();
   Future<List<Wallet>> allWallets() => db.allWallets();
 
-  /// Envelope budgeting: {categoryId → current derived balance}. Cumulative
-  /// since forever (not month-scoped) — see docs/architecture.md "Envelope
-  /// budgeting computation".
-  Stream<Map<String, int>> watchEnvelopeBalances() => db.watchEnvelopeBalances();
+  /// Envelope budgeting: {categoryId → current derived allocated/spent}.
+  /// Cumulative since forever (not month-scoped) — see docs/architecture.md
+  /// "Envelope budgeting computation".
+  Stream<Map<String, EnvelopeStatus>> watchEnvelopeBalances() =>
+      db.watchEnvelopeBalances();
 
   // ── Categories ────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,22 @@ class FinanceRepository {
               effectiveFrom: DateTime.now().millisecondsSinceEpoch ~/ 1000,
             ),
           );
+    });
+  }
+
+  /// Envelope budgeting: sets [categoryId]'s cutoff to now, so only
+  /// transactions from this point forward count toward its allocated/spent
+  /// totals. Mirrors wallets.balanceCutoffAt, applied per-category —
+  /// independent of every other category's own cutoff. Calling this again
+  /// simply moves the cutoff further forward.
+  Future<void> resetEnvelope(String categoryId, {DateTime? at}) async {
+    final cutoff = (at ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
+    await db.transaction(() async {
+      await db.customStatement(
+        'UPDATE app_categories SET envelope_cutoff_at = ? WHERE id = ?',
+        [cutoff, categoryId],
+      );
+      db.markTablesUpdated({db.appCategories});
     });
   }
 

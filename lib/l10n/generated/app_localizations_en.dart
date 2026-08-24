@@ -281,6 +281,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String get analyticsEnvelopeSectionTitle => 'Budget by category';
 
   @override
+  String analyticsEnvelopeRemaining(String amount) {
+    return 'Remaining: $amount';
+  }
+
+  @override
+  String analyticsEnvelopeOverBy(String amount) {
+    return 'Over by: $amount';
+  }
+
+  @override
+  String get analyticsEnvelopeNotFundedYet => 'No income allocated yet';
+
+  @override
+  String analyticsEnvelopeEditTitle(String label) {
+    return 'Edit budget: $label';
+  }
+
+  @override
+  String get analyticsEnvelopeResetTrigger => 'Reset budget…';
+
+  @override
+  String analyticsEnvelopeResetConfirmTitle(String label) {
+    return 'Reset budget for \"$label\"?';
+  }
+
+  @override
+  String get analyticsEnvelopeResetConfirmBody =>
+      'Transactions recorded so far will no longer count toward this category\'s budget — only new transactions from now on will be counted.';
+
+  @override
+  String get analyticsEnvelopeResetAction => 'Reset';
+
+  @override
   String get analyticsEarnByCategoryTitle => 'Income by category';
 
   @override

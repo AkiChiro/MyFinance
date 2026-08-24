@@ -622,3 +622,90 @@ On-device testing (setting percentages that sum near 100%, confirming a real ear
 | `lib/services/csv_service.dart` | `BUDGET` export-only row type |
 | `lib/l10n/app_vi.arb`, `app_en.arb` | 4 new keys: category %-field label/subtitle, `budgetPercentExceededError`, `analyticsEnvelopeSectionTitle` |
 | `test/envelope_budget_test.dart` (new), `test/migration_test.dart` | see Testing above |
+
+---
+
+## Session 12 — Envelope budgeting visual polish (Branch: FE-dev)
+
+Follow-up to Session 11, which deliberately shipped a minimal, no-progress-bar display and flagged visual treatment as separate work. This session is that deferred polish, Analytics tab only — `categories_page.dart`'s %-entry dialog stays untouched (confirmed with the user).
+
+### Design
+
+Confirmed with the user up front: each budgeted category gets a two-line row — label + `{percent}%` badge, then a thin progress bar (spent vs. allocated), then a "Còn lại: X ₫" / "Vượt: X ₫" caption. Categories with no percent currently configured (0%/unset) are **hidden** — showing them would misleadingly frame unbudgeted spending as "overspent."
+
+### Data layer (`lib/data/database.dart`)
+
+`_buildEnvelopeBalances()` computed `allocated` and `spent` internally but only ever returned their pre-subtracted difference (`Map<String, int>`) — a progress bar needs both numbers, not just the difference. No SQL or computation logic changed (same two queries, same as-of join, same `affects_balance` filtering) — just stopped collapsing the result before returning it. Added `EnvelopeStatus{allocated, spent}` (with a `balance` getter, `allocated - spent`, for callers that only want the old number) next to `AnalyticsBundle`; `watchEnvelopeBalances()`/`_buildEnvelopeBalances()` now return `Map<String, EnvelopeStatus>`. `FinanceRepository.watchEnvelopeBalances()` is a pass-through, updated to match.
+
+### UI (`lib/ui/analytics_page.dart`)
+
+`_EnvelopeSection` now takes the full `List<AppCategory>` (`_AnalyticsPageState.build()` already fetches this via `watchAllCategories()`, ordered by `sort_order`) instead of the flattened `catLabels` map, and nests a `StreamBuilder<Map<String,int>>` on `watchCategoryBudgetPercents()` (percent badge + hide-if-0% filter — the same stream `CategoriesPage` already uses for its own subtitle) around the existing `watchEnvelopeBalances()` stream. New `_EnvelopeRow` renders the two-line design: `LinearProgressIndicator` (`spendColor` when under/on budget, `colorScheme.error` when over) inside a `ClipRRect` for rounded ends, plus the caption. Explicit three-way caption/ratio logic handles the case a plain `spent/allocated` division can't: `allocated == 0 && spent == 0` (freshly budgeted, no income recorded since) → empty bar, "Chưa có thu nhập để phân bổ"; `spent > allocated` (including `allocated == 0 && spent > 0`) → full red bar, "Vượt: {spent-allocated}"; otherwise → partial bar, "Còn lại: {balance}".
+
+### l10n
+
+3 new keys: `analyticsEnvelopeRemaining`/`analyticsEnvelopeOverBy` (both take an `{amount}` placeholder, matching `analyticsCategoryTotal`'s existing `{total}` pattern) and `analyticsEnvelopeNotFundedYet`. The `{percent}%` badge itself needed no new key — matches the existing pie-chart sector label precedent (`'${pct.toStringAsFixed(1)}%'`, plain Dart interpolation, no ARB entry).
+
+### Testing
+
+`test/envelope_budget_test.dart` needed updating for the `Map<String, int>` → `Map<String, EnvelopeStatus>` signature change: every `balances['x']`-against-a-number assertion became `balances['x']?.balance`, the `collectTwo` reactivity helper's generic type changed, and a `values.fold` picked up `.balance` on its accumulator. All 18 pre-existing tests pass unchanged in behavior. `flutter analyze`: 0 new issues (same pre-existing `quick_add_page.dart` infos + `balance_test.dart` `sortOrder` errors). `flutter test`: same 3 pre-existing failures as every prior session (`balance_test.dart`/`auto_star_test.dart` load errors, one stale `sql_analytics_test.dart` assertion) — confirmed identical before/after with `git stash`.
+
+On-device testing (confirming the bar renders correctly for under/over/not-yet-funded states, tap-to-drill-down, and the section hiding itself when nothing's budgeted) was **not** performed as part of this session — flagged for the user per the project's usual on-device test checklist.
+
+### Key files changed in this session
+
+| File | Change |
+|------|--------|
+| `lib/data/database.dart` | `EnvelopeStatus` class; `watchEnvelopeBalances`/`_buildEnvelopeBalances` return `Map<String, EnvelopeStatus>` instead of `Map<String, int>` |
+| `lib/repositories/finance_repository.dart` | `watchEnvelopeBalances()` return-type pass-through updated |
+| `lib/ui/analytics_page.dart` | `_EnvelopeSection` rewritten to take `List<AppCategory>` + cross percents/balances; new `_EnvelopeRow` (percent badge, progress bar, remaining/over caption) |
+| `lib/l10n/app_vi.arb`, `app_en.arb` | 3 new keys: `analyticsEnvelopeRemaining`, `analyticsEnvelopeOverBy`, `analyticsEnvelopeNotFundedYet` |
+| `test/envelope_budget_test.dart` | Updated all `Map<String, int>`-shaped assertions/helpers for `EnvelopeStatus` |
+| `docs/tab_analytics.md`, `docs/architecture.md` | Envelope budgeting section updated for the new UI and `EnvelopeStatus` return shape |
+
+## Session 13 — Envelope budgeting: inline % editing + per-category reset (Branch: FE-dev)
+
+Two functional additions on top of Session 11/12's read-only envelope display, both requested directly against the Analytics tab: (1) edit a category's budget % without leaving Thống kê, and (2) a per-category "reset" that zeroes an envelope's cumulative allocated/spent so only transactions from that point forward count — for when a one-off anomalous transaction skews a category's bar indefinitely. Planned in `plan` mode; the user picked **per-category** reset over a single "reset all" button, explicitly to keep categories independent of each other (mirroring how each wallet already resets independently).
+
+### Design
+
+Percent editing needed zero data-layer change — `setCategoryBudgetPercent`'s append-only "as-of" history already behaves exactly as requested (old transactions keep the old %, new ones use the new %); this was purely a matter of exposing the existing call on a new UI surface. Reset is new: it mirrors `wallets.balance_cutoff_at` (Session pre-11), but as a **per-category** nullable cutoff column on `app_categories` rather than a single global flag, so resetting one category never touches another's numbers.
+
+### Schema (`lib/data/database.dart`, v8 → v9)
+
+Added `app_categories.envelope_cutoff_at` (nullable Unix seconds, mirrors `wallets.balance_cutoff_at`). Migration `if (from < 9)`: additive `ALTER TABLE app_categories ADD COLUMN envelope_cutoff_at INTEGER NULL`, no backfill — NULL is the correct "no cutoff" default for every existing row.
+
+### Data layer (`lib/data/database.dart`)
+
+Both `_buildEnvelopeBalances()` subqueries now filter by each category's own cutoff. The earned-share subquery already has the category row (`c`) in scope, so it only needed `AND e.timestamp >= COALESCE(c.envelope_cutoff_at, 0)` added to its inner `WHERE`. The spent-side query previously had no join at all (a flat `GROUP BY category`); it now joins `app_categories` on `c.id = COALESCE(t.category, 'others')` — the coalesced value, not the raw nullable column, so null-category spending still correctly resolves to the `'others'` row's own cutoff instead of being dropped by the join. `readsFrom` for the spent query changed from `{txns}` to `{txns, appCategories}`.
+
+### Repository (`lib/repositories/finance_repository.dart`)
+
+New `resetEnvelope(String categoryId, {DateTime? at})`: sets that category's `envelope_cutoff_at` to now inside a transaction, then explicitly calls `markTablesUpdated({appCategories})`. That explicit call matters here specifically — `updateWallet`'s analogous cutoff write gets away without one only because it piggybacks on a preceding *typed* `WalletsCompanion` write in the same transaction; `resetEnvelope` has no such accompanying typed write, so without the explicit call `watchEnvelopeBalances()` would silently stop re-emitting after a reset. The optional `{DateTime? at}` is a testing seam (every real call site omits it) — added because it's the only way to assert exact cutoff-boundary behavior deterministically, mirroring the `DateTime? timestamp` parameter already on `addSpending`/`addEarning`/`addTransfer`. No new validation guard: unlike the 100%-sum check on `setCategoryBudgetPercent`, a cutoff write can't violate any other row's invariant.
+
+### UI (`lib/ui/analytics_page.dart`)
+
+`_EnvelopeRow` gained a small trailing `IconButton(Icons.edit_outlined)` next to the existing `{percent}%` badge — a nested Material tappable inside the row's outer `InkWell`, so it claims its own tap before drill-down navigation fires. It opens `_showEnvelopeEditDialog`, reusing `categories_page.dart`'s validation shape exactly (`AlertDialog` + `StatefulBuilder`, a percent `TextField`, catches `BudgetPercentExceededException` into inline `errorText`). That dialog's `actionsAlignment: spaceBetween` puts a "Đặt lại ngân sách…" text button on the left (visually separated from Cancel/Save on the right); tapping it closes the edit dialog and opens `_confirmResetEnvelope`, a second, purpose-built confirmation styled like `theme_customization_page.dart`'s `_resetAll` (plain, non-error `AlertDialog` — this isn't as destructive as a delete). Confirming calls `repo.resetEnvelope(categoryId)`. The two actions are deliberately independent — tapping Reset discards any unsaved percent keystrokes, since Save and Reset are unrelated mutations. No success snackbar (matches `_resetAll`/`_confirmArchive` precedent) — the row's own `StreamBuilder`s re-render reactively once the reset lands.
+
+### l10n
+
+5 new keys, inserted after `analyticsEnvelopeNotFundedYet`: `analyticsEnvelopeEditTitle` (placeholder `label`), `analyticsEnvelopeResetTrigger`, `analyticsEnvelopeResetConfirmTitle` (placeholder `label`), `analyticsEnvelopeResetConfirmBody`, `analyticsEnvelopeResetAction`. The trigger and action labels are deliberately separate keys (not one key reused for both, unlike `_resetAll`'s single `themeResetAction`) — the trigger sits directly next to a Save button inside a form dialog, where a bare "Reset" would be ambiguous between resetting the typed field or the envelope.
+
+### Testing
+
+`test/envelope_budget_test.dart`: new `group('resetEnvelope', ...)` (7 tests) — zeroes both allocated and spent with nothing following; earning/spending before the cutoff excluded while after it still counts (separate tests, since the earned and spent sides needed separate query changes); resetting one category leaves others untouched; a txn timestamped exactly at the cutoff still counts (`>=`, not `>`); an archive/unarchive round-trip doesn't clear the cutoff; and a `collectTwo`-based reactivity test extending the existing `group('reactivity', ...)`, added specifically to catch a missing `markTablesUpdated` call. `test/migration_test.dart`: extended the existing v2→v9 cascade test with a Phase 6 asserting a pre-existing category's `envelope_cutoff_at` reads back `NULL` post-migration (seeded a category row via raw SQL in Phase 1, since this test's upgrade path — starting from v2 already past the `if (from < 2)` seeding block — never runs `_seedCategories()`).
+
+`flutter analyze`: 0 new issues (same pre-existing `quick_add_page.dart` infos + `balance_test.dart` `sortOrder` errors as every prior session). `flutter test`: 169 tests, same 3 pre-existing failures as every prior session (`balance_test.dart`/`auto_star_test.dart` load errors, one stale `sql_analytics_test.dart` assertion) — all new tests (resetEnvelope group + migration Phase 6) pass.
+
+On-device testing (confirming the edit icon/dialog and reset flow render and behave correctly — tap targets not colliding with drill-down, the confirm dialog, the bar dropping to "Chưa có thu nhập để phân bổ" immediately after a reset) was **not** performed as part of this session — flagged for the user per the project's usual on-device test checklist.
+
+### Key files changed in this session
+
+| File | Change |
+|------|--------|
+| `lib/data/database.dart` | `app_categories.envelope_cutoff_at` column + v9 migration; `_buildEnvelopeBalances()` both subqueries filter by per-category cutoff (spent-side query gained a join) |
+| `lib/repositories/finance_repository.dart` | New `resetEnvelope(categoryId, {at})` |
+| `lib/ui/analytics_page.dart` | `_EnvelopeRow` gained an edit icon + `onEdit`; new `_showEnvelopeEditDialog`/`_confirmResetEnvelope` dialogs |
+| `lib/l10n/app_vi.arb`, `app_en.arb` | 5 new keys: `analyticsEnvelopeEditTitle`, `analyticsEnvelopeResetTrigger`, `analyticsEnvelopeResetConfirmTitle`, `analyticsEnvelopeResetConfirmBody`, `analyticsEnvelopeResetAction` |
+| `test/envelope_budget_test.dart` | New `group('resetEnvelope', ...)` (7 tests) + 1 reactivity test |
+| `test/migration_test.dart` | New Phase 6 asserting the v9 column migrates in as `NULL` |
+| `docs/tab_analytics.md`, `docs/architecture.md`, `CLAUDE.md` | Schema version, `app_categories` table, and Envelope budgeting sections updated for the new column/reset mechanism and the second %-edit entry point |

@@ -86,10 +86,10 @@ void main() {
 
       final balances = await db.watchEnvelopeBalances().first;
 
-      expect(balances['necessities'], 500000);
-      expect(balances['food'], 150000);
-      expect(balances['hobbies'], 200000);
-      expect(balances['others'], 150000);
+      expect(balances['necessities']?.balance, 500000);
+      expect(balances['food']?.balance, 150000);
+      expect(balances['hobbies']?.balance, 200000);
+      expect(balances['others']?.balance, 150000);
     });
 
     test('percent change is not retroactive — past allocations frozen',
@@ -106,7 +106,7 @@ void main() {
 
       // 500k (old 50%) + 400k (new 40%) = 900k. A retroactive design would
       // read 400k + 400k = 800k instead — this is the decisive assertion.
-      expect(balances['necessities'], 900000);
+      expect(balances['necessities']?.balance, 900000);
     });
 
     test('spending drives an envelope negative and the txn still persists',
@@ -119,7 +119,7 @@ void main() {
           amount: 200000, walletId: wid, category: 'necessities');
 
       final balances = await db.watchEnvelopeBalances().first;
-      expect(balances['necessities'], 50000 - 200000);
+      expect(balances['necessities']?.balance, 50000 - 200000);
       final txns = await db.allTxns();
       expect(txns.where((t) => t.category == 'necessities'), isNotEmpty);
     });
@@ -136,7 +136,7 @@ void main() {
 
       final balances = await db.watchEnvelopeBalances().first;
       // others envelope = 15,000 (15% of 100k) - 5,000 spent.
-      expect(balances['others'], 15000 - 5000);
+      expect(balances['others']?.balance, 15000 - 5000);
     });
 
     test('affects_balance=0 rows are excluded from both sides', () async {
@@ -155,7 +155,7 @@ void main() {
           affectsBalance: false);
 
       final balances = await db.watchEnvelopeBalances().first;
-      expect(balances['necessities'], 0);
+      expect(balances['necessities']?.balance, 0);
     });
 
     test('transfers never participate', () async {
@@ -176,7 +176,7 @@ void main() {
 
       final balances = await db.watchEnvelopeBalances().first;
       // Unaffected by the transfer — still exactly 50% of the earning.
-      expect(balances['necessities'], 50000);
+      expect(balances['necessities']?.balance, 50000);
     });
 
     test('earning before any percent was ever configured contributes \$0',
@@ -187,7 +187,7 @@ void main() {
           type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
 
       final balances = await db.watchEnvelopeBalances().first;
-      expect(balances[freshCatId], 0);
+      expect(balances[freshCatId]?.balance, 0);
     });
 
     test('archived category is absent from the map', () async {
@@ -208,7 +208,7 @@ void main() {
           type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 20000);
 
       final balances = await db.watchEnvelopeBalances().first;
-      final tracked = balances.values.fold<int>(0, (a, b) => a + b);
+      final tracked = balances.values.fold<int>(0, (a, b) => a + b.balance);
       // 500k + 150k + 200k + 50k = 900k of the 1,000,000 earning — the
       // remaining 100k (10%) is real money but isn't in any envelope.
       expect(tracked, 900000);
@@ -221,15 +221,104 @@ void main() {
           (await db.allTxns()).firstWhere((t) => t.type == TxTypes.earning);
 
       var balances = await db.watchEnvelopeBalances().first;
-      expect(balances['necessities'], 500000);
+      expect(balances['necessities']?.balance, 500000);
 
       await repo.updateTxn(earningTxn.copyWith(amount: 2000000));
       balances = await db.watchEnvelopeBalances().first;
-      expect(balances['necessities'], 1000000);
+      expect(balances['necessities']?.balance, 1000000);
 
       await repo.deleteTxn(earningTxn.id);
       balances = await db.watchEnvelopeBalances().first;
-      expect(balances['necessities'], 0);
+      expect(balances['necessities']?.balance, 0);
+    });
+
+    group('resetEnvelope', () {
+      test('reset zeroes both allocated and spent when nothing follows',
+          () async {
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
+        await _insertTxn(db,
+            type: TxTypes.spending,
+            amount: 20000,
+            walletId: wid,
+            category: 'necessities',
+            timestamp: 200);
+
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+
+        final balances = await db.watchEnvelopeBalances().first;
+        expect(balances['necessities']?.allocated, 0);
+        expect(balances['necessities']?.spent, 0);
+      });
+
+      test('earning before the cutoff excluded, one after still counted',
+          () async {
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 2000);
+
+        final balances = await db.watchEnvelopeBalances().first;
+        // Only the post-cutoff earning counts: 50% of 1,000,000.
+        expect(balances['necessities']?.allocated, 500000);
+      });
+
+      test('spending before the cutoff excluded, one after still counted',
+          () async {
+        await _insertTxn(db,
+            type: TxTypes.spending,
+            amount: 10000,
+            walletId: wid,
+            category: 'necessities',
+            timestamp: 100);
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+        await _insertTxn(db,
+            type: TxTypes.spending,
+            amount: 30000,
+            walletId: wid,
+            category: 'necessities',
+            timestamp: 2000);
+
+        final balances = await db.watchEnvelopeBalances().first;
+        expect(balances['necessities']?.spent, 30000);
+      });
+
+      test("resetting one category doesn't affect another", () async {
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
+
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+
+        final balances = await db.watchEnvelopeBalances().first;
+        expect(balances['necessities']?.allocated, 0);
+        // food/hobbies/others are untouched by necessities' own reset.
+        expect(balances['food']?.balance, 150000);
+        expect(balances['hobbies']?.balance, 200000);
+        expect(balances['others']?.balance, 150000);
+      });
+
+      test('a txn exactly at the cutoff still counts (>=, not >)', () async {
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 1000);
+
+        final balances = await db.watchEnvelopeBalances().first;
+        expect(balances['necessities']?.allocated, 500000);
+      });
+
+      test('archiving and unarchiving does not clear the cutoff', () async {
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
+        await repo.resetEnvelope('necessities', at: _ts(1000));
+
+        await repo.archiveCategory('necessities');
+        await repo.unarchiveCategory('necessities');
+
+        final balances = await db.watchEnvelopeBalances().first;
+        // Pre-cutoff earning still excluded after the archive round-trip.
+        expect(balances['necessities']?.allocated, 0);
+      });
     });
 
     group('reactivity', () {
@@ -241,9 +330,10 @@ void main() {
       // the second moveNext() hangs forever. A live StreamBuilder in the
       // running app never pauses like this, so this is purely a test-
       // consumption-pattern issue, not a bug in watchEnvelopeBalances itself.
-      Future<List<Map<String, int>>> collectTwo(
-          Stream<Map<String, int>> stream, Future<void> Function() mutate) async {
-        final events = <Map<String, int>>[];
+      Future<List<Map<String, EnvelopeStatus>>> collectTwo(
+          Stream<Map<String, EnvelopeStatus>> stream,
+          Future<void> Function() mutate) async {
+        final events = <Map<String, EnvelopeStatus>>[];
         final second = Completer<void>();
         final sub = stream.listen((v) {
           events.add(v);
@@ -262,7 +352,7 @@ void main() {
           () => _insertTxn(db,
               type: TxTypes.earning, amount: 100000, walletId: wid, timestamp: 100),
         );
-        expect(events.last['necessities'], 50000);
+        expect(events.last['necessities']?.balance, 50000);
       });
 
       test('re-emits on setCategoryBudgetPercent', () async {
@@ -275,6 +365,14 @@ void main() {
         final events = await collectTwo(
             db.watchEnvelopeBalances(), () => repo.archiveCategory('hobbies'));
         expect(events.last.containsKey('hobbies'), isFalse);
+      });
+
+      test('re-emits on resetEnvelope', () async {
+        await _insertTxn(db,
+            type: TxTypes.earning, amount: 1000000, walletId: wid, timestamp: 100);
+        final events = await collectTwo(
+            db.watchEnvelopeBalances(), () => repo.resetEnvelope('necessities'));
+        expect(events.last['necessities']?.allocated, 0);
       });
     });
   });
