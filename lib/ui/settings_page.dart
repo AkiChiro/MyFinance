@@ -87,7 +87,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     try {
       final r = await ref.read(repositoryProvider).csv.importAll(path);
       _snack(l10n.csvImportResult(
-          r.walletsAdded, r.walletsSkipped, r.txnsAdded, r.txnsUpdated));
+          r.walletsAdded,
+          r.walletsSkipped,
+          r.txnsAdded,
+          r.txnsUpdated,
+          r.categoriesAdded,
+          r.categoriesSkipped,
+          r.budgetEntriesAdded));
     } catch (e) {
       _snack(l10n.settingsImportFailed(e.toString()));
     } finally {

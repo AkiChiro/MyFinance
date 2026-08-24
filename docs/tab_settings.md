@@ -108,7 +108,7 @@ await SharePlus.instance.share(ShareParams(files: [file], subject: 'MyFinance �
 3. repo.csv.importAll(file.path)
 ```
 
-A single import path, no mode picker. `importAll` reads **wallets + transactions only** from the file (categories/settings/keywords are export-only, not restored). Wallets are insert-if-absent — a row whose id already exists in the database is skipped, so the device's live `balance_cutoff_at`/`sort_order`/`package_name` are never clobbered by an older export. Transactions are upserted by id, so re-importing the same file (or importing overlapping backups) is safe and idempotent. The result snackbar reports wallets-added/skipped and transactions-added/updated counts separately.
+A single import path, no mode picker. `importAll` reads **wallets, transactions, categories, and budget history** from the file (settings/keywords are still export-only, not restored). Wallets/categories are insert-if-absent — a row whose id already exists in the database is skipped, so the device's live state (a wallet's `balance_cutoff_at`/`sort_order`/`package_name`, a category's `archived`/`threshold`/`sort_order`) is never clobbered by an older export. Transactions are upserted by id, so re-importing the same file (or importing overlapping backups) is safe and idempotent. Budget history (envelope percentages) is likewise insert-if-absent by id — since the table is append-only, re-import never duplicates history rows. The result snackbar reports wallets-added/skipped, transactions-added/updated, categories-added/skipped, and budget-entries-added counts.
 
 ## Category management
 

@@ -49,6 +49,24 @@ void main() {
         timestamp, 0, 0, 'csvImport', affectsBalance ? 1 : 0,
       ];
 
+  List<dynamic> categoryRow(
+    String id,
+    String label, {
+    String kind = 'spending',
+    int threshold = 0,
+    bool isDefault = false,
+    bool archived = false,
+    int sortOrder = 0,
+  }) =>
+      [
+        'CATEGORY', id, label, kind, threshold,
+        isDefault ? 1 : 0, archived ? 1 : 0, sortOrder,
+      ];
+
+  List<dynamic> budgetRow(
+          String id, String categoryId, int percent, int effectiveFrom) =>
+      ['BUDGET', id, categoryId, percent, effectiveFrom];
+
   group('importAll', () {
     test('imports wallets and transactions into an empty database', () async {
       final f = writeCsv([
@@ -141,11 +159,9 @@ void main() {
       expect(txn.description, 'updated');
     });
 
-    test('CATEGORY/SETTING/KEYWORD/META rows are ignored without error',
-        () async {
+    test('SETTING/KEYWORD/META rows are ignored without error', () async {
       final f = writeCsv([
         ['META', 'schema_version', '1'],
-        ['CATEGORY', 'fake', 'Fake', 'spending', 0, 0, 0, 0],
         ['SETTING', 'ui.locale', 'vi'],
         ['KEYWORD', 'cà phê', 'food', 10],
       ]);
@@ -154,11 +170,76 @@ void main() {
 
       expect(result.walletsAdded, 0);
       expect(result.txnsAdded, 0);
+      expect(result.categoriesAdded, 0);
+      expect(result.budgetEntriesAdded, 0);
       expect(await db.allWallets(), isEmpty);
       expect(await db.allTxns(), isEmpty);
-      // The fake CSV category row must not have been written to the DB.
-      final categories = await db.allCategories();
-      expect(categories.any((c) => c.id == 'fake'), isFalse);
+    });
+
+    test('imports categories and budget history into an empty database',
+        () async {
+      final f = writeCsv([
+        categoryRow('c1', 'Custom', threshold: 100000, sortOrder: 5),
+        budgetRow('b1', 'c1', 30, 0),
+      ]);
+
+      final result = await csv.importAll(f.path);
+
+      expect(result.categoriesAdded, 1);
+      expect(result.categoriesSkipped, 0);
+      expect(result.budgetEntriesAdded, 1);
+      expect(result.budgetEntriesSkipped, 0);
+
+      final category =
+          (await db.allCategories()).firstWhere((c) => c.id == 'c1');
+      expect(category.label, 'Custom');
+      expect(category.threshold, 100000);
+      expect(category.sortOrder, 5);
+
+      final percents = await db.categoryBudgetPercents();
+      expect(percents['c1'], 30);
+    });
+
+    test('re-importing categories and budget history is idempotent',
+        () async {
+      final f = writeCsv([
+        categoryRow('c1', 'Custom'),
+        budgetRow('b1', 'c1', 30, 0),
+      ]);
+
+      await csv.importAll(f.path);
+      final categoriesAfterFirst = (await db.allCategories()).length;
+      final budgetAfterFirst = (await db.allCategoryBudgetHistory()).length;
+      final result2 = await csv.importAll(f.path);
+
+      expect(result2.categoriesAdded, 0);
+      expect(result2.categoriesSkipped, 1);
+      expect(result2.budgetEntriesAdded, 0);
+      expect(result2.budgetEntriesSkipped, 1);
+
+      expect((await db.allCategories()).length, categoriesAfterFirst);
+      expect(
+          (await db.allCategoryBudgetHistory()).length, budgetAfterFirst);
+    });
+
+    test('existing category with a matching id is preserved, not overwritten',
+        () async {
+      await db.into(db.appCategories).insert(AppCategoriesCompanion.insert(
+            id: 'c-fixed',
+            label: 'Original',
+            kind: 'spending',
+            threshold: const Value(1000),
+          ));
+
+      final f = writeCsv([categoryRow('c-fixed', 'Imported', threshold: 999999)]);
+      final result = await csv.importAll(f.path);
+
+      expect(result.categoriesAdded, 0);
+      expect(result.categoriesSkipped, 1);
+      final category =
+          (await db.allCategories()).firstWhere((c) => c.id == 'c-fixed');
+      expect(category.label, 'Original');
+      expect(category.threshold, 1000);
     });
   });
 }

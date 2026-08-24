@@ -965,9 +965,15 @@ abstract class AppLocalizations {
   /// No description provided for @csvImportResult.
   ///
   /// In vi, this message translates to:
-  /// **'{walletsAdded} ví mới ({walletsSkipped} bỏ qua), {txnsAdded} giao dịch mới, {txnsUpdated} giao dịch đã cập nhật.'**
+  /// **'{walletsAdded} ví mới ({walletsSkipped} bỏ qua), {txnsAdded} giao dịch mới, {txnsUpdated} giao dịch đã cập nhật, {categoriesAdded} danh mục mới ({categoriesSkipped} bỏ qua), {budgetEntriesAdded} mức ngân sách mới.'**
   String csvImportResult(
-      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated);
+      int walletsAdded,
+      int walletsSkipped,
+      int txnsAdded,
+      int txnsUpdated,
+      int categoriesAdded,
+      int categoriesSkipped,
+      int budgetEntriesAdded);
 
   /// No description provided for @settingsImportFailed.
   ///

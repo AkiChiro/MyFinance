@@ -505,8 +505,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String csvImportResult(
-      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated) {
-    return '$walletsAdded new wallets ($walletsSkipped skipped), $txnsAdded new transactions, $txnsUpdated updated.';
+      int walletsAdded,
+      int walletsSkipped,
+      int txnsAdded,
+      int txnsUpdated,
+      int categoriesAdded,
+      int categoriesSkipped,
+      int budgetEntriesAdded) {
+    return '$walletsAdded new wallets ($walletsSkipped skipped), $txnsAdded new transactions, $txnsUpdated updated, $categoriesAdded new categories ($categoriesSkipped skipped), $budgetEntriesAdded new budget entries.';
   }
 
   @override

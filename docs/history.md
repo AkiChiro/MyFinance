@@ -709,3 +709,31 @@ On-device testing (confirming the edit icon/dialog and reset flow render and beh
 | `test/envelope_budget_test.dart` | New `group('resetEnvelope', ...)` (7 tests) + 1 reactivity test |
 | `test/migration_test.dart` | New Phase 6 asserting the v9 column migrates in as `NULL` |
 | `docs/tab_analytics.md`, `docs/architecture.md`, `CLAUDE.md` | Schema version, `app_categories` table, and Envelope budgeting sections updated for the new column/reset mechanism and the second %-edit entry point |
+
+---
+
+## Session 14 — CSV backup/restore: import support for categories + budget history (Branch: FE-dev)
+
+**Problem:** Session 9's unified CSV export already wrote `CATEGORY` and `BUDGET` (`category_budget_history`) rows, but `importAll` only ever consumed `WALLET`/`TXN` rows — both were parsed and silently discarded on import, documented as "export-only." The user asked for the envelope-budgeting feature to round-trip through CSV backup/restore. Investigation surfaced a dependency: `BUDGET` rows key off `category_id`, and default categories use fixed string ids (`'food'`, `'necessities'`, etc., stable across installs) but user-created custom categories get a `uuid.v4()` id — those would never match after a fresh install, leaving restored budget history orphaned unless `CATEGORY` rows were imported too. Confirmed with the user: import both.
+
+**Solution (`lib/services/csv_service.dart`):** Two new branches in `importAll`'s row loop, both following the existing `WALLET` insert-if-absent pattern (skip a row whose `id` already exists, so live device state always wins over an older export):
+- `CATEGORY` → `db.into(db.appCategories).insert(AppCategoriesCompanion.insert(...))`, field-for-field the same shape as `_seedDefaultCategories`.
+- `BUDGET` → `db.into(db.categoryBudgetHistory).insert(CategoryBudgetHistoryCompanion.insert(...))`, same shape as `_seedBudgetPercents`. Insert-if-absent-by-id is a natural fit here since the table is append-only — re-importing the same file just skips every row it already wrote, rather than duplicating history. No FK constraint enforces `category_id`, so a `BUDGET` row importing before/without a matching category degrades the same way an orphan `txns.category` already does — silently inert until a matching id shows up. This is a non-issue on a normal round-trip since export always writes `CATEGORY` rows before `BUDGET` rows and both are consumed in one sequential pass.
+
+`ImportSummary` gained `categoriesAdded`/`categoriesSkipped`/`budgetEntriesAdded`/`budgetEntriesSkipped`, threaded through to the settings-page result snackbar (`l10n.csvImportResult`, extended with 3 new placeholders in both `.arb` files, regenerated via `flutter gen-l10n`). SETTING/KEYWORD/META rows remain export-only/ignored — unchanged.
+
+### Testing
+
+`test/csv_import_test.dart`: the old "CATEGORY/SETTING/KEYWORD/META rows are ignored" test was split — CATEGORY is no longer in that ignored set, so it got its own coverage instead. Added: fresh import of `CATEGORY`+`BUDGET` rows populates `app_categories`/`category_budget_history` and the percent is readable via `db.categoryBudgetPercents()`; re-import is idempotent (skip counts, no duplicate rows — asserted via before/after counts rather than an assumed-empty table, since `AppDatabase.forTesting` seeds the default categories/budget rows on creation); an existing category with a matching id is preserved, not overwritten.
+
+`flutter analyze`: clean on the changed files. `flutter test test/csv_import_test.dart`: 8/8 pass. Full suite: same 3 pre-existing failures as every prior session since Session 8 (`balance_test.dart`/`auto_star_test.dart` load errors from the still-uncommitted Session 7 `sortOrder` work, one stale `sql_analytics_test.dart` assertion) — confirmed unrelated via `git status`, none of those three files are touched by this session's diff.
+
+### Key files changed in this session
+
+| File | Change |
+|------|--------|
+| `lib/services/csv_service.dart` | `importAll` gained `CATEGORY`/`BUDGET` branches (insert-if-absent); `ImportSummary` gained 4 fields |
+| `lib/ui/settings_page.dart` | `_import()`'s snackbar call passes the 3 new `csvImportResult` placeholders |
+| `lib/l10n/app_vi.arb`, `app_en.arb` | `csvImportResult` extended with `categoriesAdded`/`categoriesSkipped`/`budgetEntriesAdded` |
+| `test/csv_import_test.dart` | Split the stale ignored-rows test; added category/budget import + idempotency + preservation cases |
+| `docs/architecture.md`, `docs/tab_settings.md` | `CsvService`/CSV import sections updated — CATEGORY/BUDGET are now imported, not export-only |

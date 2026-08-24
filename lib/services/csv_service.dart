@@ -17,11 +17,19 @@ class ImportSummary {
   final int walletsSkipped;
   final int txnsAdded;
   final int txnsUpdated;
+  final int categoriesAdded;
+  final int categoriesSkipped;
+  final int budgetEntriesAdded;
+  final int budgetEntriesSkipped;
   const ImportSummary({
     required this.walletsAdded,
     required this.walletsSkipped,
     required this.txnsAdded,
     required this.txnsUpdated,
+    required this.categoriesAdded,
+    required this.categoriesSkipped,
+    required this.budgetEntriesAdded,
+    required this.budgetEntriesSkipped,
   });
 }
 
@@ -40,8 +48,9 @@ const _schemaVersion = '1';
 /// is a record-type discriminator
 /// (META/WALLET/TXN/CATEGORY/SETTING/KEYWORD/BUDGET), so heterogeneous
 /// "tables" round-trip through one `CsvToListConverter` pass. [importAll]
-/// only consumes WALLET and TXN rows; CATEGORY/SETTING/KEYWORD/BUDGET are
-/// exported for backup/documentation only.
+/// consumes WALLET/CATEGORY (insert-if-absent), TXN (upsert), and BUDGET
+/// (insert-if-absent, append-only history); SETTING/KEYWORD/META are
+/// exported for backup/documentation only and ignored on import.
 class CsvService {
   CsvService(this.db);
   final AppDatabase db;
@@ -119,16 +128,20 @@ class CsvService {
     return XFile(file.path);
   }
 
-  /// Imports wallets and transactions from a single unified CSV file.
+  /// Imports wallets, transactions, categories, and budget history from a
+  /// single unified CSV file.
   ///
-  /// Wallets: insert-if-absent — a row whose id already exists in the
-  /// database is skipped, so live per-wallet state (`balance_cutoff_at`,
-  /// `sort_order`, `package_name`) is never clobbered by an older export.
+  /// Wallets/categories: insert-if-absent — a row whose id already exists in
+  /// the database is skipped, so live state (`balance_cutoff_at`,
+  /// `sort_order`, `archived`, etc.) is never clobbered by an older export.
   /// Transactions: upsert by id, applying every column exactly as stored in
   /// the file (no forced mode — `affects_balance`/`source`/`starred` all
   /// round-trip faithfully).
+  /// Budget history: insert-if-absent by id, same as wallets/categories —
+  /// the table is append-only, so this makes re-importing the same file a
+  /// no-op rather than duplicating history rows.
   ///
-  /// CATEGORY/SETTING/KEYWORD/META rows are ignored (export-only sections).
+  /// SETTING/KEYWORD/META rows are ignored (export-only sections).
   Future<ImportSummary> importAll(String path) async {
     final content = await File(path).readAsString();
     final rows = const CsvToListConverter().convert(content);
@@ -137,11 +150,16 @@ class CsvService {
 
     var walletsAdded = 0, walletsSkipped = 0;
     var txnsAdded = 0, txnsUpdated = 0;
+    var categoriesAdded = 0, categoriesSkipped = 0;
+    var budgetEntriesAdded = 0, budgetEntriesSkipped = 0;
     final now = DateTime.now();
 
     await db.transaction(() async {
       final existingWalletIds = (await db.allWallets()).map((w) => w.id).toSet();
       final existingTxnIds = (await db.allTxns()).map((t) => t.id).toSet();
+      final existingCategoryIds = (await db.allCategories()).map((c) => c.id).toSet();
+      final existingBudgetIds =
+          (await db.allCategoryBudgetHistory()).map((b) => b.id).toSet();
 
       for (final r in rows) {
         if (r.isEmpty) continue;
@@ -201,8 +219,41 @@ class CsvService {
           } else {
             txnsUpdated++;
           }
+        } else if (recordType == _rtCategory) {
+          final id = cell(r, 1);
+          if (id.isEmpty) continue;
+          if (existingCategoryIds.contains(id)) {
+            categoriesSkipped++;
+            continue;
+          }
+          await db.into(db.appCategories).insert(AppCategoriesCompanion.insert(
+                id: id,
+                label: cell(r, 2),
+                kind: cell(r, 3),
+                threshold: Value(int.tryParse(cell(r, 4)) ?? 0),
+                isDefault: Value(cell(r, 5) == '1'),
+                archived: Value(cell(r, 6) == '1'),
+                sortOrder: Value(int.tryParse(cell(r, 7)) ?? 0),
+              ));
+          existingCategoryIds.add(id);
+          categoriesAdded++;
+        } else if (recordType == _rtBudget) {
+          final id = cell(r, 1);
+          if (id.isEmpty) continue;
+          if (existingBudgetIds.contains(id)) {
+            budgetEntriesSkipped++;
+            continue;
+          }
+          await db.into(db.categoryBudgetHistory).insert(CategoryBudgetHistoryCompanion.insert(
+                id: id,
+                categoryId: cell(r, 2),
+                percent: int.tryParse(cell(r, 3)) ?? 0,
+                effectiveFrom: int.tryParse(cell(r, 4)) ?? 0,
+              ));
+          existingBudgetIds.add(id);
+          budgetEntriesAdded++;
         }
-        // else: META/CATEGORY/SETTING/KEYWORD — export-only, ignored on import.
+        // else: META/SETTING/KEYWORD — export-only, ignored on import.
       }
     });
 
@@ -211,6 +262,10 @@ class CsvService {
       walletsSkipped: walletsSkipped,
       txnsAdded: txnsAdded,
       txnsUpdated: txnsUpdated,
+      categoriesAdded: categoriesAdded,
+      categoriesSkipped: categoriesSkipped,
+      budgetEntriesAdded: budgetEntriesAdded,
+      budgetEntriesSkipped: budgetEntriesSkipped,
     );
   }
 }

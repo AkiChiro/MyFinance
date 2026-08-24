@@ -504,8 +504,14 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String csvImportResult(
-      int walletsAdded, int walletsSkipped, int txnsAdded, int txnsUpdated) {
-    return '$walletsAdded ví mới ($walletsSkipped bỏ qua), $txnsAdded giao dịch mới, $txnsUpdated giao dịch đã cập nhật.';
+      int walletsAdded,
+      int walletsSkipped,
+      int txnsAdded,
+      int txnsUpdated,
+      int categoriesAdded,
+      int categoriesSkipped,
+      int budgetEntriesAdded) {
+    return '$walletsAdded ví mới ($walletsSkipped bỏ qua), $txnsAdded giao dịch mới, $txnsUpdated giao dịch đã cập nhật, $categoriesAdded danh mục mới ($categoriesSkipped bỏ qua), $budgetEntriesAdded mức ngân sách mới.';
   }
 
   @override
