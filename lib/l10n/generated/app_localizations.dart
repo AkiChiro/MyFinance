@@ -590,6 +590,54 @@ abstract class AppLocalizations {
   /// **'Ngân sách theo danh mục'**
   String get analyticsEnvelopeSectionTitle;
 
+  /// No description provided for @analyticsEnvelopeRemaining.
+  ///
+  /// In vi, this message translates to:
+  /// **'Còn lại: {amount}'**
+  String analyticsEnvelopeRemaining(String amount);
+
+  /// No description provided for @analyticsEnvelopeOverBy.
+  ///
+  /// In vi, this message translates to:
+  /// **'Vượt: {amount}'**
+  String analyticsEnvelopeOverBy(String amount);
+
+  /// No description provided for @analyticsEnvelopeNotFundedYet.
+  ///
+  /// In vi, this message translates to:
+  /// **'Chưa có thu nhập để phân bổ'**
+  String get analyticsEnvelopeNotFundedYet;
+
+  /// No description provided for @analyticsEnvelopeEditTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Sửa ngân sách: {label}'**
+  String analyticsEnvelopeEditTitle(String label);
+
+  /// No description provided for @analyticsEnvelopeResetTrigger.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đặt lại ngân sách…'**
+  String get analyticsEnvelopeResetTrigger;
+
+  /// No description provided for @analyticsEnvelopeResetConfirmTitle.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đặt lại ngân sách cho \"{label}\"?'**
+  String analyticsEnvelopeResetConfirmTitle(String label);
+
+  /// No description provided for @analyticsEnvelopeResetConfirmBody.
+  ///
+  /// In vi, this message translates to:
+  /// **'Các giao dịch đã ghi trước đó sẽ không còn tính vào ngân sách của danh mục này — chỉ giao dịch từ bây giờ trở đi mới được tính.'**
+  String get analyticsEnvelopeResetConfirmBody;
+
+  /// No description provided for @analyticsEnvelopeResetAction.
+  ///
+  /// In vi, this message translates to:
+  /// **'Đặt lại'**
+  String get analyticsEnvelopeResetAction;
+
   /// No description provided for @analyticsEarnByCategoryTitle.
   ///
   /// In vi, this message translates to:

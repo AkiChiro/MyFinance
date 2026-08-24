@@ -49,7 +49,7 @@ All providers are declared in `lib/providers.dart` and overridden in `main()` wi
 
 `homeTabIndexProvider`/`txnTypeFilterProvider`/`txnCategoryFilterProvider`/`txnStarredOnlyProvider` follow the exact `monthModeProvider`/`selectedMonthProvider` pattern: cross-widget UI state lives in a `StateProvider` rather than a screen's local `State`, whenever more than one screen needs to read or write it. `TransactionsPage` is still each filter's primary owner (`_sortDirection` alone stays local `State` — it reorders, never hides rows, so no other screen needs to touch it); `AnalyticsPage` writes all four as part of drill-down navigation — see "Analytics drill-down" below.
 
-## Database schema (schema version 8)
+## Database schema (schema version 9)
 
 ### Table: `wallets`
 
@@ -120,6 +120,7 @@ Partial indexes on `wallet_id`, `wallet_to_id`, `timestamp`, `(type, timestamp)`
 | `is_default` | BOOL | seeded on first run |
 | `archived` | BOOL | soft-delete (never physically remove — historical transactions reference category IDs) |
 | `sort_order` | INT | display order |
+| `envelope_cutoff_at` | INT? | Unix seconds; when set, only transactions at or after this timestamp count toward this category's envelope allocated/spent totals |
 
 ### Table: `category_budget_history`
 
@@ -177,21 +178,30 @@ The user assigns each active spending category a % of every earning (e.g. Thiế
 **Non-retroactive percentages**: `category_budget_history` is append-only — editing a category's % inserts a new row (`effective_from = now`) rather than mutating one. `AppDatabase._buildEnvelopeBalances()` reads it via an "as-of" join: for each earning, the applicable percent is the history row with the largest `effective_from <= ` that earning's own `timestamp`. This makes a percent change apply only to income recorded after the change — mirrors `wallets.balance_cutoff_at`'s point-in-time cutover, just as a full history instead of one mutable column. An earning older than any configured percent for a category contributes exactly $0 (no applicable row) — no backfill migration needed when a percent is first set.
 
 ```sql
--- earned share per active spending category (as-of join against history)
+-- earned share per active spending category (as-of join against history),
+-- filtered by this category's own envelope_cutoff_at
 SELECT c.id, SUM(e.amount * <percent in effect at e.timestamp> / 100)
 FROM app_categories c ... JOIN txns e ON e.type='earning' AND e.affects_balance=1
+  AND e.timestamp >= COALESCE(c.envelope_cutoff_at, 0)
 WHERE c.kind='spending' AND c.archived=0
 
--- spent per category, all-time (not month-scoped)
-SELECT COALESCE(category,'others'), SUM(amount)
-FROM txns WHERE type='spending' AND affects_balance=1 GROUP BY 1
+-- spent per category, all-time (not month-scoped), same cutoff filter —
+-- joined on the coalesced category value so null-category spending still
+-- resolves to the 'others' row's own cutoff
+SELECT COALESCE(t.category,'others'), SUM(t.amount)
+FROM txns t JOIN app_categories c ON c.id = COALESCE(t.category,'others')
+WHERE t.type='spending' AND t.affects_balance=1
+  AND t.timestamp >= COALESCE(c.envelope_cutoff_at, 0)
+GROUP BY 1
 ```
 
-`envelope = earned − spent`, glued in Dart per category (`AppDatabase.watchEnvelopeBalances()`, exposed via `FinanceRepository`). Unlike analytics, envelopes **filter on `affects_balance`** — they track real money only, not CSV context-only rows. Transfers never participate (never `type='spending'`/`'earning'`). Archived categories are excluded from the read (`archived=0`) — no special-casing needed in the write paths; if later unarchived, its envelope recomputes across its whole history as if always active, consistent with how `archived` behaves everywhere else in this codebase (a hide flag, not a timeline toggle). `watchEnvelopeBalances()` listens for changes on `txns`, `category_budget_history`, **and** `app_categories` (editing a % or archiving a category must both trigger a re-emit — `watchAnalyticsBundle` only listens to `txns`, which would silently miss those two).
+`envelope = earned − spent`, glued in Dart per category into `EnvelopeStatus{allocated, spent}` (a `balance` getter computes `allocated - spent`) — `AppDatabase.watchEnvelopeBalances()` returns `Stream<Map<String, EnvelopeStatus>>`, exposed via `FinanceRepository`; keeping both numbers rather than only their difference is what lets the Analytics tab's `_EnvelopeSection` render a spent-vs-allocated progress bar (see `docs/tab_analytics.md`). Unlike analytics, envelopes **filter on `affects_balance`** — they track real money only, not CSV context-only rows. Transfers never participate (never `type='spending'`/`'earning'`). Archived categories are excluded from the read (`archived=0`) — no special-casing needed in the write paths; if later unarchived, its envelope recomputes across its whole history as if always active, consistent with how `archived` behaves everywhere else in this codebase (a hide flag, not a timeline toggle). `watchEnvelopeBalances()` listens for changes on `txns`, `category_budget_history`, **and** `app_categories` (editing a % or archiving a category must both trigger a re-emit — `watchAnalyticsBundle` only listens to `txns`, which would silently miss those two).
 
 **Overspending an envelope is informational only** — a spending transaction that pushes a category negative still saves normally; this is independent of the hard wallet-balance guard (`OverspendException`/`_assertSufficient`).
 
-**Setting a percent** (`FinanceRepository.setCategoryBudgetPercent`): mirrors `OverspendException`'s zero-payload-exception shape. Throws `BudgetPercentExceededException` if the new percent, summed with every other *active* spending category's current percent (the target category's own prior value is excluded from the sum, not double-counted), would exceed 100%. Summing to less than 100% is allowed — the shortfall is just untracked in any envelope.
+**Setting a percent** (`FinanceRepository.setCategoryBudgetPercent`): mirrors `OverspendException`'s zero-payload-exception shape. Throws `BudgetPercentExceededException` if the new percent, summed with every other *active* spending category's current percent (the target category's own prior value is excluded from the sum, not double-counted), would exceed 100%. Summing to less than 100% is allowed — the shortfall is just untracked in any envelope. Editing the percent is exposed both from Cài đặt → Quản lý danh mục and directly on the Thống kê tab (see `docs/tab_analytics.md`), both calling the same repository method.
+
+**Resetting an envelope** (`FinanceRepository.resetEnvelope`, schema v9): mirrors `wallets.balance_cutoff_at`, applied **per-category** via a new `app_categories.envelope_cutoff_at` column rather than a single global flag — resetting one category never affects another's numbers, exactly like each wallet's cutoff is independent of every other wallet's. The call sets that category's cutoff to `unix_now` inside a transaction; since it's a bare `customStatement` with no accompanying typed write in the same transaction (unlike `updateWallet`, whose cutoff write piggybacks on a preceding typed `WalletsCompanion` write), it calls `markTablesUpdated({appCategories})` explicitly so `watchEnvelopeBalances()` re-emits. Both `_buildEnvelopeBalances()` subqueries above filter on this cutoff; only the spent-side query needed a new join to reach it (the earned-side subquery already has the category row in scope). No validation guard exists for reset — unlike the 100%-sum check on setting a percent, a cutoff write can't violate any other row's invariant.
 
 Fresh installs (`onCreate` only, never the upgrade path) seed necessities/food/hobbies/others at 50/15/20/15 (`effective_from: 0`) — the feature's own worked example. An install upgrading from an earlier schema version gains **no** seeded percentages: there is no percent that was ever "in effect" for pre-existing data, so every category reads as unbudgeted until the user explicitly configures one.
 

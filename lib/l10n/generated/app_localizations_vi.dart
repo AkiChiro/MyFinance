@@ -280,6 +280,39 @@ class AppLocalizationsVi extends AppLocalizations {
   String get analyticsEnvelopeSectionTitle => 'Ngân sách theo danh mục';
 
   @override
+  String analyticsEnvelopeRemaining(String amount) {
+    return 'Còn lại: $amount';
+  }
+
+  @override
+  String analyticsEnvelopeOverBy(String amount) {
+    return 'Vượt: $amount';
+  }
+
+  @override
+  String get analyticsEnvelopeNotFundedYet => 'Chưa có thu nhập để phân bổ';
+
+  @override
+  String analyticsEnvelopeEditTitle(String label) {
+    return 'Sửa ngân sách: $label';
+  }
+
+  @override
+  String get analyticsEnvelopeResetTrigger => 'Đặt lại ngân sách…';
+
+  @override
+  String analyticsEnvelopeResetConfirmTitle(String label) {
+    return 'Đặt lại ngân sách cho \"$label\"?';
+  }
+
+  @override
+  String get analyticsEnvelopeResetConfirmBody =>
+      'Các giao dịch đã ghi trước đó sẽ không còn tính vào ngân sách của danh mục này — chỉ giao dịch từ bây giờ trở đi mới được tính.';
+
+  @override
+  String get analyticsEnvelopeResetAction => 'Đặt lại';
+
+  @override
   String get analyticsEarnByCategoryTitle => 'Thu nhập theo danh mục';
 
   @override

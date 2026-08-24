@@ -39,7 +39,7 @@ Native        android_overlay/       Kotlin: BankCaptureService, CaptureChannelA
 
 ---
 
-## Database schema (v8)
+## Database schema (v9)
 
 ### `wallets`
 | Column | Type | Notes |
@@ -59,7 +59,7 @@ id, type (`spending`/`earning`/`transfer`), amount (VND positive), description?,
 Deferred capture inbox — see `docs/architecture.md` for full schema.
 
 ### `app_categories`
-id, label, kind (`spending`/`earning`), threshold (VND auto-star limit), is_default, archived, sort_order
+id, label, kind (`spending`/`earning`), threshold (VND auto-star limit), is_default, archived, sort_order, **envelope_cutoff_at** (Unix seconds?; per-category envelope reset, mirrors wallets.balance_cutoff_at)
 
 ### `category_budget_history`
 Append-only envelope-budgeting percent history: id, category_id, percent (0-100), effective_from (Unix seconds). New row per edit, never mutated — see Budget invariants below.
@@ -96,6 +96,7 @@ Append-only envelope-budgeting percent history: id, category_id, percent (0-100)
 - Only `type='earning'`/`'spending'` rows with `affects_balance=1` participate. Unlike analytics, envelopes **do** filter on `affects_balance` (they track real money only).
 - Overspending an envelope is informational only — never blocks a write (contrast with `OverspendException`/wallet balance).
 - `FinanceRepository.setCategoryBudgetPercent` blocks only if the new sum across **active** spending categories would exceed 100% (`BudgetPercentExceededException`) — summing to less than 100% is allowed.
+- `FinanceRepository.resetEnvelope(categoryId)` sets that category's own `envelope_cutoff_at` to now — mirrors `balance_cutoff_at`, but **per-category**: resetting one category's envelope never affects another's. No validation guard (unlike the 100% sum check above) — a cutoff write can't violate any other row's invariant.
 
 ---
 

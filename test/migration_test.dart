@@ -81,6 +81,11 @@ void main() {
     await v2.customStatement(
         'INSERT INTO wallets (id, name, initial_balance, type) VALUES (?, ?, ?, ?)',
         ['w2', 'Savings', 0, 'bank']);
+    // A pre-existing category row, inserted using only the v2 columns
+    // (envelope_cutoff_at doesn't exist yet at this schema version).
+    await v2.customStatement(
+        'INSERT INTO app_categories (id, label, kind) VALUES (?, ?, ?)',
+        ['necessities', 'Thiết yếu', 'spending']);
 
     // t1: native spending — imported=0
     await v2.customStatement(
@@ -175,6 +180,15 @@ void main() {
     expect(await db.categoryBudgetPercents(), isEmpty,
         reason: 'upgrading installs must not be retroactively seeded with '
             'budget percents they never configured');
+
+    // ── Phase 6: v9 envelope-cutoff migration ─────────────────────────────────
+    // Additive-only column; NULL is the correct default for pre-existing
+    // categories (no cutoff = all-time txns still count, unchanged behavior).
+    final cutoffRows = await db.customSelect(
+      'SELECT envelope_cutoff_at FROM app_categories WHERE id = ?',
+      variables: [const Variable<String>('necessities')],
+    ).get();
+    expect(cutoffRows.single.readNullable<int>('envelope_cutoff_at'), null);
 
     await db.close();
   });

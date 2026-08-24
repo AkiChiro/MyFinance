@@ -97,6 +97,10 @@ class AppCategories extends Table {
   BoolColumn get isDefault => boolean().withDefault(const Constant(false))();
   BoolColumn get archived => boolean().withDefault(const Constant(false))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  // Unix seconds; when set, only txns at or after this timestamp count
+  // toward this category's envelope allocated/spent totals (mirrors
+  // wallets.balanceCutoffAt, applied per-category).
+  IntColumn get envelopeCutoffAt => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -149,6 +153,17 @@ class AnalyticsBundle {
   final Map<String, int> earnByCat;
 }
 
+/// Per-category envelope status. [allocated] = earned share assigned to
+/// this category so far (as-of budget-% join); [spent] = all-time spending
+/// in this category. Both cumulative since forever, mirroring the balance
+/// they used to collapse into.
+class EnvelopeStatus {
+  const EnvelopeStatus({required this.allocated, required this.spent});
+  final int allocated;
+  final int spent;
+  int get balance => allocated - spent;
+}
+
 // ── Database ──────────────────────────────────────────────────────────────────
 
 @DriftDatabase(tables: [
@@ -165,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -258,6 +273,15 @@ class AppDatabase extends _$AppDatabase {
             // — every category reads as unbudgeted until the user explicitly
             // sets one. Contrast with _seedBudgetPercents(), which only runs
             // for brand-new installs via onCreate.
+          }
+          if (from < 9) {
+            // Per-category envelope cutoff timestamp (mirrors
+            // balance_cutoff_at for wallets, applied per-category instead).
+            // NULL = no cutoff; all-time txns count toward that category's
+            // envelope.
+            await customStatement(
+              'ALTER TABLE app_categories ADD COLUMN envelope_cutoff_at INTEGER NULL',
+            );
           }
         },
       );
@@ -536,7 +560,7 @@ class AppDatabase extends _$AppDatabase {
   /// category_budget_history, or app_categories (e.g. editing a % or
   /// archiving a category in CategoriesPage) — watchAnalyticsBundle only
   /// listens to txns, which would silently miss those two.
-  Stream<Map<String, int>> watchEnvelopeBalances() async* {
+  Stream<Map<String, EnvelopeStatus>> watchEnvelopeBalances() async* {
     yield await _buildEnvelopeBalances();
     await for (final _ in tableUpdates(TableUpdateQuery.allOf([
       TableUpdateQuery.onTable(txns),
@@ -547,13 +571,16 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  Future<Map<String, int>> _buildEnvelopeBalances() async {
+  Future<Map<String, EnvelopeStatus>> _buildEnvelopeBalances() async {
     // Earned share per active spending category. The inner correlated
     // subquery is an "as-of" join: the single most recent history row for
     // this category at-or-before each earning's own timestamp — this is
     // what makes a % change apply only to income recorded after the change.
     // COALESCE(...,0) means "no applicable row yet" contributes $0, so an
     // earning older than any configured percent needs no special-casing.
+    // The envelope_cutoff_at filter mirrors wallets' balance_cutoff_at:
+    // resetting a category's envelope excludes all earnings before the
+    // reset, independent of every other category's own cutoff.
     final earnedRows = await customSelect('''
       SELECT c.id AS category_id,
         COALESCE((
@@ -563,28 +590,38 @@ class AppDatabase extends _$AppDatabase {
             ORDER BY bh.effective_from DESC LIMIT 1
           ), 0))
           FROM txns e WHERE e.type = 'earning' AND e.affects_balance = 1
+            AND e.timestamp >= COALESCE(c.envelope_cutoff_at, 0)
         ), 0) AS earned_x100
       FROM app_categories c
       WHERE c.kind = 'spending' AND c.archived = 0
       ''', readsFrom: {appCategories, txns, categoryBudgetHistory}).get();
 
-    // Spent per category, ALL-TIME. Unlike analytics (which intentionally
+    // Spent per category, ALL-TIME (subject to the same per-category cutoff
+    // as the earned side above). Unlike analytics (which intentionally
     // ignores affects_balance — see docs/architecture.md), envelopes filter
     // affects_balance=1: they track real money only, not CSV context-only
-    // rows. Transfers are excluded "for free" (never type='spending').
+    // rows. Transfers are excluded "for free" (never type='spending'). The
+    // join is against COALESCE(t.category, 'others') — joining the raw
+    // nullable column would drop null-category spending instead of
+    // attributing it to the 'others' envelope.
     final spentRows = await customSelect('''
-      SELECT COALESCE(category, 'others') AS cat, SUM(amount) AS total
-      FROM txns WHERE type = 'spending' AND affects_balance = 1
+      SELECT COALESCE(t.category, 'others') AS cat, SUM(t.amount) AS total
+      FROM txns t
+      JOIN app_categories c ON c.id = COALESCE(t.category, 'others')
+      WHERE t.type = 'spending' AND t.affects_balance = 1
+        AND t.timestamp >= COALESCE(c.envelope_cutoff_at, 0)
       GROUP BY cat
-      ''', readsFrom: {txns}).get();
+      ''', readsFrom: {txns, appCategories}).get();
     final spentByCat = {
       for (final r in spentRows) r.read<String>('cat'): r.read<int>('total')
     };
 
     return {
       for (final r in earnedRows)
-        r.read<String>('category_id'): (r.read<int>('earned_x100') ~/ 100) -
-            (spentByCat[r.read<String>('category_id')] ?? 0)
+        r.read<String>('category_id'): EnvelopeStatus(
+          allocated: r.read<int>('earned_x100') ~/ 100,
+          spent: spentByCat[r.read<String>('category_id')] ?? 0,
+        )
     };
   }
 

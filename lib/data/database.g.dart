@@ -1194,9 +1194,23 @@ class $AppCategoriesTable extends AppCategories
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _envelopeCutoffAtMeta =
+      const VerificationMeta('envelopeCutoffAt');
   @override
-  List<GeneratedColumn> get $columns =>
-      [id, label, kind, threshold, isDefault, archived, sortOrder];
+  late final GeneratedColumn<int> envelopeCutoffAt = GeneratedColumn<int>(
+      'envelope_cutoff_at', aliasedName, true,
+      type: DriftSqlType.int, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        label,
+        kind,
+        threshold,
+        isDefault,
+        archived,
+        sortOrder,
+        envelopeCutoffAt
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1240,6 +1254,12 @@ class $AppCategoriesTable extends AppCategories
       context.handle(_sortOrderMeta,
           sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
     }
+    if (data.containsKey('envelope_cutoff_at')) {
+      context.handle(
+          _envelopeCutoffAtMeta,
+          envelopeCutoffAt.isAcceptableOrUnknown(
+              data['envelope_cutoff_at']!, _envelopeCutoffAtMeta));
+    }
     return context;
   }
 
@@ -1263,6 +1283,8 @@ class $AppCategoriesTable extends AppCategories
           .read(DriftSqlType.bool, data['${effectivePrefix}archived'])!,
       sortOrder: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
+      envelopeCutoffAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}envelope_cutoff_at']),
     );
   }
 
@@ -1280,6 +1302,7 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
   final bool isDefault;
   final bool archived;
   final int sortOrder;
+  final int? envelopeCutoffAt;
   const AppCategory(
       {required this.id,
       required this.label,
@@ -1287,7 +1310,8 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
       required this.threshold,
       required this.isDefault,
       required this.archived,
-      required this.sortOrder});
+      required this.sortOrder,
+      this.envelopeCutoffAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1298,6 +1322,9 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
     map['is_default'] = Variable<bool>(isDefault);
     map['archived'] = Variable<bool>(archived);
     map['sort_order'] = Variable<int>(sortOrder);
+    if (!nullToAbsent || envelopeCutoffAt != null) {
+      map['envelope_cutoff_at'] = Variable<int>(envelopeCutoffAt);
+    }
     return map;
   }
 
@@ -1310,6 +1337,9 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
       isDefault: Value(isDefault),
       archived: Value(archived),
       sortOrder: Value(sortOrder),
+      envelopeCutoffAt: envelopeCutoffAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(envelopeCutoffAt),
     );
   }
 
@@ -1324,6 +1354,7 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
       isDefault: serializer.fromJson<bool>(json['isDefault']),
       archived: serializer.fromJson<bool>(json['archived']),
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
+      envelopeCutoffAt: serializer.fromJson<int?>(json['envelopeCutoffAt']),
     );
   }
   @override
@@ -1337,6 +1368,7 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
       'isDefault': serializer.toJson<bool>(isDefault),
       'archived': serializer.toJson<bool>(archived),
       'sortOrder': serializer.toJson<int>(sortOrder),
+      'envelopeCutoffAt': serializer.toJson<int?>(envelopeCutoffAt),
     };
   }
 
@@ -1347,7 +1379,8 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
           int? threshold,
           bool? isDefault,
           bool? archived,
-          int? sortOrder}) =>
+          int? sortOrder,
+          Value<int?> envelopeCutoffAt = const Value.absent()}) =>
       AppCategory(
         id: id ?? this.id,
         label: label ?? this.label,
@@ -1356,6 +1389,9 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
         isDefault: isDefault ?? this.isDefault,
         archived: archived ?? this.archived,
         sortOrder: sortOrder ?? this.sortOrder,
+        envelopeCutoffAt: envelopeCutoffAt.present
+            ? envelopeCutoffAt.value
+            : this.envelopeCutoffAt,
       );
   AppCategory copyWithCompanion(AppCategoriesCompanion data) {
     return AppCategory(
@@ -1366,6 +1402,9 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
       isDefault: data.isDefault.present ? data.isDefault.value : this.isDefault,
       archived: data.archived.present ? data.archived.value : this.archived,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
+      envelopeCutoffAt: data.envelopeCutoffAt.present
+          ? data.envelopeCutoffAt.value
+          : this.envelopeCutoffAt,
     );
   }
 
@@ -1378,14 +1417,15 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
           ..write('threshold: $threshold, ')
           ..write('isDefault: $isDefault, ')
           ..write('archived: $archived, ')
-          ..write('sortOrder: $sortOrder')
+          ..write('sortOrder: $sortOrder, ')
+          ..write('envelopeCutoffAt: $envelopeCutoffAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, label, kind, threshold, isDefault, archived, sortOrder);
+  int get hashCode => Object.hash(id, label, kind, threshold, isDefault,
+      archived, sortOrder, envelopeCutoffAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1396,7 +1436,8 @@ class AppCategory extends DataClass implements Insertable<AppCategory> {
           other.threshold == this.threshold &&
           other.isDefault == this.isDefault &&
           other.archived == this.archived &&
-          other.sortOrder == this.sortOrder);
+          other.sortOrder == this.sortOrder &&
+          other.envelopeCutoffAt == this.envelopeCutoffAt);
 }
 
 class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
@@ -1407,6 +1448,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
   final Value<bool> isDefault;
   final Value<bool> archived;
   final Value<int> sortOrder;
+  final Value<int?> envelopeCutoffAt;
   final Value<int> rowid;
   const AppCategoriesCompanion({
     this.id = const Value.absent(),
@@ -1416,6 +1458,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
     this.isDefault = const Value.absent(),
     this.archived = const Value.absent(),
     this.sortOrder = const Value.absent(),
+    this.envelopeCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AppCategoriesCompanion.insert({
@@ -1426,6 +1469,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
     this.isDefault = const Value.absent(),
     this.archived = const Value.absent(),
     this.sortOrder = const Value.absent(),
+    this.envelopeCutoffAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         label = Value(label),
@@ -1438,6 +1482,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
     Expression<bool>? isDefault,
     Expression<bool>? archived,
     Expression<int>? sortOrder,
+    Expression<int>? envelopeCutoffAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1448,6 +1493,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
       if (isDefault != null) 'is_default': isDefault,
       if (archived != null) 'archived': archived,
       if (sortOrder != null) 'sort_order': sortOrder,
+      if (envelopeCutoffAt != null) 'envelope_cutoff_at': envelopeCutoffAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1460,6 +1506,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
       Value<bool>? isDefault,
       Value<bool>? archived,
       Value<int>? sortOrder,
+      Value<int?>? envelopeCutoffAt,
       Value<int>? rowid}) {
     return AppCategoriesCompanion(
       id: id ?? this.id,
@@ -1469,6 +1516,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
       isDefault: isDefault ?? this.isDefault,
       archived: archived ?? this.archived,
       sortOrder: sortOrder ?? this.sortOrder,
+      envelopeCutoffAt: envelopeCutoffAt ?? this.envelopeCutoffAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1497,6 +1545,9 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
     if (sortOrder.present) {
       map['sort_order'] = Variable<int>(sortOrder.value);
     }
+    if (envelopeCutoffAt.present) {
+      map['envelope_cutoff_at'] = Variable<int>(envelopeCutoffAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1513,6 +1564,7 @@ class AppCategoriesCompanion extends UpdateCompanion<AppCategory> {
           ..write('isDefault: $isDefault, ')
           ..write('archived: $archived, ')
           ..write('sortOrder: $sortOrder, ')
+          ..write('envelopeCutoffAt: $envelopeCutoffAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3030,6 +3082,7 @@ typedef $$AppCategoriesTableCreateCompanionBuilder = AppCategoriesCompanion
   Value<bool> isDefault,
   Value<bool> archived,
   Value<int> sortOrder,
+  Value<int?> envelopeCutoffAt,
   Value<int> rowid,
 });
 typedef $$AppCategoriesTableUpdateCompanionBuilder = AppCategoriesCompanion
@@ -3041,6 +3094,7 @@ typedef $$AppCategoriesTableUpdateCompanionBuilder = AppCategoriesCompanion
   Value<bool> isDefault,
   Value<bool> archived,
   Value<int> sortOrder,
+  Value<int?> envelopeCutoffAt,
   Value<int> rowid,
 });
 
@@ -3073,6 +3127,10 @@ class $$AppCategoriesTableFilterComposer
 
   ColumnFilters<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get envelopeCutoffAt => $composableBuilder(
+      column: $table.envelopeCutoffAt,
+      builder: (column) => ColumnFilters(column));
 }
 
 class $$AppCategoriesTableOrderingComposer
@@ -3104,6 +3162,10 @@ class $$AppCategoriesTableOrderingComposer
 
   ColumnOrderings<int> get sortOrder => $composableBuilder(
       column: $table.sortOrder, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get envelopeCutoffAt => $composableBuilder(
+      column: $table.envelopeCutoffAt,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$AppCategoriesTableAnnotationComposer
@@ -3135,6 +3197,9 @@ class $$AppCategoriesTableAnnotationComposer
 
   GeneratedColumn<int> get sortOrder =>
       $composableBuilder(column: $table.sortOrder, builder: (column) => column);
+
+  GeneratedColumn<int> get envelopeCutoffAt => $composableBuilder(
+      column: $table.envelopeCutoffAt, builder: (column) => column);
 }
 
 class $$AppCategoriesTableTableManager extends RootTableManager<
@@ -3170,6 +3235,7 @@ class $$AppCategoriesTableTableManager extends RootTableManager<
             Value<bool> isDefault = const Value.absent(),
             Value<bool> archived = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
+            Value<int?> envelopeCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               AppCategoriesCompanion(
@@ -3180,6 +3246,7 @@ class $$AppCategoriesTableTableManager extends RootTableManager<
             isDefault: isDefault,
             archived: archived,
             sortOrder: sortOrder,
+            envelopeCutoffAt: envelopeCutoffAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -3190,6 +3257,7 @@ class $$AppCategoriesTableTableManager extends RootTableManager<
             Value<bool> isDefault = const Value.absent(),
             Value<bool> archived = const Value.absent(),
             Value<int> sortOrder = const Value.absent(),
+            Value<int?> envelopeCutoffAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               AppCategoriesCompanion.insert(
@@ -3200,6 +3268,7 @@ class $$AppCategoriesTableTableManager extends RootTableManager<
             isDefault: isDefault,
             archived: archived,
             sortOrder: sortOrder,
+            envelopeCutoffAt: envelopeCutoffAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
